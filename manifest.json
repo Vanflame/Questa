@@ -6,9 +6,19 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": [
+    "standalone",
+    "fullscreen",
+    "minimal-ui"
+  ],
+  "prefer_related_applications": false,
   "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
+  "splash_screen": {
+    "background_color": "#ffffff",
+    "theme_color": "#2563eb"
+  },
   "lang": "en",
   "dir": "ltr",
   "icons": [
@@ -23,6 +33,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/images/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
   "categories": [

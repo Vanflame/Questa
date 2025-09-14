@@ -1,6 +1,6 @@
-const CACHE_NAME = 'questa-earn-v1';
-const STATIC_CACHE_NAME = 'questa-static-v1';
-const DYNAMIC_CACHE_NAME = 'questa-dynamic-v1';
+const CACHE_NAME = 'questa-earn-v2';
+const STATIC_CACHE_NAME = 'questa-static-v2';
+const DYNAMIC_CACHE_NAME = 'questa-dynamic-v2';
 
 // Files to cache immediately
 const STATIC_FILES = [
@@ -87,6 +87,12 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Special handling for root path to ensure standalone mode
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+        event.respondWith(handleRootRequest(request));
+        return;
+    }
+
     // Handle different types of requests
     if (isStaticAsset(request.url)) {
         // Cache-first strategy for static assets
@@ -99,6 +105,56 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(staleWhileRevalidate(request));
     }
 });
+
+// Special handler for root requests to ensure standalone mode
+async function handleRootRequest(request) {
+    try {
+        // Always try network first for root requests
+        const networkResponse = await fetch(request);
+        if (networkResponse.ok) {
+            const cache = await caches.open(STATIC_CACHE_NAME);
+            cache.put(request, networkResponse.clone());
+        }
+        return networkResponse;
+    } catch (error) {
+        // Fallback to cached version
+        const cachedResponse = await caches.match('/index.html');
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+        // Last resort - return a basic HTML response
+        return new Response(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Questa Earn</title>
+        <meta name="theme-color" content="#2563eb">
+        <link rel="manifest" href="/manifest.json">
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #2563eb; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 20px auto; }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+      </head>
+      <body>
+        <h1>Questa Earn</h1>
+        <p>Loading...</p>
+        <div class="spinner"></div>
+        <script>
+          // Redirect to login page
+          setTimeout(() => {
+            window.location.href = '/login/';
+          }, 1000);
+        </script>
+      </body>
+      </html>
+    `, {
+            headers: { 'Content-Type': 'text/html' }
+        });
+    }
+}
 
 // Cache-first strategy for static assets
 async function cacheFirst(request) {
