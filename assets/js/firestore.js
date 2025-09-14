@@ -389,17 +389,9 @@ class FirestoreManager {
                 };
             } else {
                 console.log('❌ No task status document found for:', `${userId}_${taskId}`);
-            }
-
-            // Fallback to verification-based status
-            const snapshot = await db.collection(this.collections.verifications)
-                .where('userId', '==', userId)
-                .where('taskId', '==', taskId)
-                .orderBy('createdAt', 'desc')
-                .get();
-
-            if (snapshot.empty) {
-                return { status: 'locked', phase: null };
+                // For new users with no task status document, return available status
+                // Don't fall back to verification logic to avoid status changes
+                return { status: 'available', phase: null };
             }
 
             const verifications = snapshot.docs.map(doc => ({

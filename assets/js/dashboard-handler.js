@@ -1912,8 +1912,8 @@ class DashboardHandler {
                 }
             }
 
-            // If we have a custom task status, use it (prioritize task status over verification status)
-            if (taskStatus.status && taskStatus.status !== 'locked') {
+            // If we have a task status document, use it (this is the source of truth)
+            if (taskStatus.status && taskStatus.status !== 'available') {
                 console.log('✅ Using task status from taskStatuses:', taskStatus.status);
                 console.log('🔍 Task status details:', {
                     status: taskStatus.status,
@@ -1928,32 +1928,9 @@ class DashboardHandler {
                 };
             }
 
-            console.log('⚠️ Task status was locked, falling back to verification-based status');
-            console.log('🔍 This should not happen if immutable link was approved!');
-
-            // Fallback to verification-based status
-            const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
-            const taskVerifications = verifications.filter(v => v.taskId === taskId);
-
-            if (taskVerifications.length === 0) {
-                return { status: 'available', phase: null };
-            }
-
-            const initialVerification = taskVerifications.find(v => v.phase === 'initial');
-            const finalVerification = taskVerifications.find(v => v.phase === 'final');
-
-            if (finalVerification && finalVerification.status === 'approved') {
-                return { status: 'complete', phase: 'final', verification: finalVerification };
-            } else if (finalVerification && finalVerification.status === 'pending') {
-                return { status: 'pending', phase: 'final', verification: finalVerification };
-            } else if (initialVerification && initialVerification.status === 'approved') {
-                return { status: 'unlocked', phase: 'initial', verification: initialVerification };
-            } else if (initialVerification && initialVerification.status === 'pending') {
-                return { status: 'pending', phase: 'initial', verification: initialVerification };
-            } else if (initialVerification && initialVerification.status === 'rejected') {
-                return { status: 'rejected', phase: 'initial', verification: initialVerification };
-            }
-
+            // If we reach here, it means no task status document exists
+            // This should only happen for completely new users
+            console.log('📝 New user detected - no task status document exists');
             return { status: 'available', phase: null };
         } catch (error) {
             console.error('Error getting user task status:', error);

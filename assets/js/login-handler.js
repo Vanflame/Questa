@@ -69,9 +69,12 @@ class LoginHandler {
     }
 
     async signInWithGoogle() {
+        let loadingModal = null;
+
         try {
             this.isSigningIn = true;
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Signing In', 'Please wait while we sign you in with Google...');
+
             const provider = new firebase.auth.GoogleAuthProvider();
             const result = await auth.signInWithPopup(provider);
 
@@ -85,11 +88,13 @@ class LoginHandler {
             this.showToast('Failed to sign in with Google: ' + error.message, 'error');
         } finally {
             this.isSigningIn = false;
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
         }
     }
 
     async signInWithEmail() {
+        let loadingModal = null;
+
         try {
             // Validate form before submission
             if (!this.validateForm()) {
@@ -97,7 +102,8 @@ class LoginHandler {
             }
 
             this.isSigningIn = true;
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Signing In', 'Please wait while we sign you in...');
+
             const email = document.getElementById('email').value.trim();
             const password = document.getElementById('password').value;
 
@@ -111,7 +117,7 @@ class LoginHandler {
             this.handleAuthError(error);
         } finally {
             this.isSigningIn = false;
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -160,12 +166,43 @@ class LoginHandler {
         }
     }
 
-    showLoading(show) {
-        const spinner = document.getElementById('loading-spinner');
-        if (show) {
-            spinner.classList.remove('hidden');
-        } else {
-            spinner.classList.add('hidden');
+    // Modern loading modal functions (same as dashboard)
+    showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
+        // Remove existing loading modal if any
+        const existingModal = document.querySelector('.loading-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Create loading modal
+        const modal = document.createElement('div');
+        modal.className = 'loading-modal';
+        modal.innerHTML = `
+            <div class="loading-modal-content">
+                <div class="loading-spinner"></div>
+                <h3>${title}</h3>
+                <p>${message}</p>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Trigger animation
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+
+        return modal;
+    }
+
+    hideLoadingModal(modal) {
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
         }
     }
 

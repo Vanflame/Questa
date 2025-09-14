@@ -78,9 +78,12 @@ class RegisterHandler {
 
 
     async signInWithGoogle() {
+        let loadingModal = null;
+
         try {
             this.isRegistering = true;
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Creating Account', 'Please wait while we create your account with Google...');
+
             const provider = new firebase.auth.GoogleAuthProvider();
             const result = await auth.signInWithPopup(provider);
 
@@ -94,11 +97,13 @@ class RegisterHandler {
             this.showToast('Failed to create account with Google: ' + error.message, 'error');
         } finally {
             this.isRegistering = false;
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
         }
     }
 
     async registerWithEmail() {
+        let loadingModal = null;
+
         try {
             // Validate form before submission
             console.log('🔍 Validating form...');
@@ -111,7 +116,8 @@ class RegisterHandler {
 
             console.log('🔄 Starting email registration...');
             this.isRegistering = true;
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Creating Account', 'Please wait while we create your account...');
+
             const email = document.getElementById('register-email').value.trim();
             const password = document.getElementById('register-password').value;
 
@@ -127,7 +133,7 @@ class RegisterHandler {
             this.handleAuthError(error);
         } finally {
             this.isRegistering = false;
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -199,12 +205,43 @@ class RegisterHandler {
         }
     }
 
-    showLoading(show) {
-        const spinner = document.getElementById('loading-spinner');
-        if (show) {
-            spinner.classList.remove('hidden');
-        } else {
-            spinner.classList.add('hidden');
+    // Modern loading modal functions (same as dashboard)
+    showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
+        // Remove existing loading modal if any
+        const existingModal = document.querySelector('.loading-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Create loading modal
+        const modal = document.createElement('div');
+        modal.className = 'loading-modal';
+        modal.innerHTML = `
+            <div class="loading-modal-content">
+                <div class="loading-spinner"></div>
+                <h3>${title}</h3>
+                <p>${message}</p>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Trigger animation
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+
+        return modal;
+    }
+
+    hideLoadingModal(modal) {
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
         }
     }
 
