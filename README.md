@@ -35,7 +35,7 @@
 
 ## 🚀 Live Demo
 
-**🔗 [Try Questa Now](https://vanflame.github.io/questa)**
+**🔗 [Try Questa Now](https://questaearns.shop/)**
 
 ### Demo Accounts
 - **User Account**: `demo@questa.com` / `demo123`
@@ -283,4 +283,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Made with ❤️ for the gaming community**
 
 </div>
+
 
