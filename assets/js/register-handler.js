@@ -353,18 +353,27 @@ class RegisterHandler {
     validateTerms() {
         const termsCheckbox = document.getElementById('terms-checkbox');
         const termsError = document.getElementById('terms-error');
-        const checkboxContainer = termsCheckbox.closest('.checkbox-container');
+        const checkboxContainer = termsCheckbox.closest('.modern-checkbox-container');
 
         console.log('🔍 Validating terms checkbox:', termsCheckbox.checked);
 
         // Clear previous error
-        termsError.textContent = '';
-        checkboxContainer.classList.remove('error');
+        if (termsError) {
+            termsError.textContent = '';
+        }
+
+        if (checkboxContainer) {
+            checkboxContainer.classList.remove('error');
+        }
 
         if (!termsCheckbox.checked) {
             console.log('❌ Terms not agreed to');
-            termsError.textContent = 'You must agree to the terms and conditions';
-            checkboxContainer.classList.add('error');
+            if (termsError) {
+                termsError.textContent = 'You must agree to the terms and conditions';
+            }
+            if (checkboxContainer) {
+                checkboxContainer.classList.add('error');
+            }
             return false;
         }
 

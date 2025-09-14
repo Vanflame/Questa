@@ -1291,6 +1291,15 @@ body {
     font-weight: 500;
 }
 
+.modern-checkbox-container.error .modern-checkmark {
+    border-color: #ef4444;
+    background-color: #fef2f2;
+}
+
+.modern-checkbox-container.error {
+    color: #ef4444;
+}
+
 .modern-terms-link:hover {
     text-decoration: underline;
 }
