@@ -10193,14 +10193,16 @@ body::before {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 10px 16px;
+    gap: 8px;
+    padding: 12px 20px;
     border: none;
     border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
+    min-height: 44px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .immutable-link-card .approve-btn {
@@ -10210,7 +10212,8 @@ body::before {
 
 .immutable-link-card .approve-btn:hover {
     background: #059669;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
 }
 
 .immutable-link-card .reject-btn {
@@ -10220,7 +10223,16 @@ body::before {
 
 .immutable-link-card .reject-btn:hover {
     background: #dc2626;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+}
+
+.immutable-link-card .action-btn i {
+    font-size: 16px;
+}
+
+.immutable-link-card .action-btn span {
+    font-weight: 600;
 }
 
 /* Responsive Design */

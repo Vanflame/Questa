@@ -1375,7 +1375,7 @@ class DashboardHandler {
                 }
 
                 if (syncedCount > 0) {
-                    this.showToast(`Synced ${syncedCount} existing timers to database for admin view`, 'success');
+                    this.showToast(`Updated ${syncedCount} existing timers successfully.`, 'success');
                 }
 
             } catch (error) {

@@ -215,7 +215,16 @@ class AdminHandler {
                 const button = e.target.classList.contains('copy-link-btn') ? e.target : e.target.closest('.copy-link-btn');
                 const link = button.getAttribute('data-link');
                 navigator.clipboard.writeText(link).then(() => {
-                    this.showToast('Link copied to clipboard!', 'success');
+                    this.showToast('Immutable link copied to clipboard!', 'success');
+                    // Visual feedback
+                    const icon = button.querySelector('i');
+                    const originalIcon = icon.className;
+                    icon.className = 'fas fa-check';
+                    button.style.background = '#10b981';
+                    setTimeout(() => {
+                        icon.className = originalIcon;
+                        button.style.background = '#3b82f6';
+                    }, 2000);
                 }).catch(() => {
                     this.showToast('Failed to copy link', 'error');
                 });
@@ -3241,9 +3250,12 @@ Example:
 
         if (!links || links.length === 0) {
             linksList.innerHTML = `
-                <div class="text-center py-8">
-                    <i class="fas fa-link text-4xl text-gray-400 mb-4"></i>
-                    <p class="text-gray-500">No Immutable links pending review</p>
+                <div class="empty-state">
+                    <div class="empty-state-icon">
+                        <i class="fas fa-link"></i>
+                    </div>
+                    <h3 class="empty-state-title">No Immutable Links</h3>
+                    <p class="empty-state-description">No immutable links are currently pending review</p>
                 </div>
             `;
             return;
@@ -3256,18 +3268,24 @@ Example:
         console.log('🔍 Creating immutable link card for:', link);
         console.log('🔍 Link status:', link.status);
         console.log('🔍 ImmutableLinkApproved:', link.immutableLinkApproved);
+        console.log('🔍 Should show buttons:', (link.status === 'pending' || link.status === 'pending_immutable_review' || (link.status === 'ready_for_phase2' && !link.immutableLinkApproved)));
 
         const submittedDate = link.updatedAt ? new Date(link.updatedAt.toDate()).toLocaleString() : 'Unknown';
         const userEmail = link.user?.email || 'Unknown';
         const taskTitle = link.task?.title || 'Unknown Task';
         const shortLink = link.immutableLink.length > 60 ? link.immutableLink.substring(0, 60) + '...' : link.immutableLink;
 
-        // Determine status styling
+        // Determine status styling - simplified and consistent
         let statusClass = 'status-pending';
         let statusIcon = 'fas fa-hourglass-half';
-        let statusText = 'Pending';
+        let statusText = 'Pending Review';
 
-        if (link.status === 'approved') {
+        // Check if link is approved (either explicitly approved or ready_for_phase2 with approval)
+        const isApproved = link.status === 'approved' ||
+            (link.status === 'ready_for_phase2' && link.immutableLinkApproved) ||
+            link.immutableLinkApproved === true;
+
+        if (isApproved) {
             statusClass = 'status-approved';
             statusIcon = 'fas fa-check-circle';
             statusText = 'Approved';
@@ -3275,18 +3293,11 @@ Example:
             statusClass = 'status-rejected';
             statusIcon = 'fas fa-times-circle';
             statusText = 'Rejected';
-        } else if (link.status === 'ready_for_phase2' && link.immutableLinkApproved) {
-            statusClass = 'status-approved';
-            statusIcon = 'fas fa-check-circle';
-            statusText = 'Approved';
-        } else if (link.status === 'ready_for_phase2') {
+        } else {
+            // All other statuses are considered pending
             statusClass = 'status-pending';
             statusIcon = 'fas fa-hourglass-half';
-            statusText = 'Pending';
-        } else if (link.status === 'pending_immutable_review') {
-            statusClass = 'status-pending';
-            statusIcon = 'fas fa-hourglass-half';
-            statusText = 'Pending';
+            statusText = 'Pending Review';
         }
 
         return `
@@ -3329,30 +3340,28 @@ Example:
                     </div>
                 </div>
 
-                ${(link.status === 'pending' || link.status === 'pending_immutable_review' || (link.status === 'ready_for_phase2' && !link.immutableLinkApproved)) ? `
                 <div class="card-actions">
-                    <button class="action-btn approve-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}">
-                        <i class="fas fa-check"></i>
-                        <span>Approve</span>
-                    </button>
-                    <button class="action-btn reject-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}">
-                        <i class="fas fa-times"></i>
-                        <span>Reject</span>
-                    </button>
-                </div>
-                ` : `
-                <div class="card-actions">
-                    <div class="status-info">
-                        <span class="status-text">${statusText} on ${link.status === 'approved' ? (link.approvedAt ? new Date(link.approvedAt.toDate()).toLocaleString() : 'Unknown') : (link.rejectedAt ? new Date(link.rejectedAt.toDate()).toLocaleString() : 'Unknown')}</span>
-                        ${link.immutableLinkApproved ? `
-                        <button class="action-btn reset-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}" style="margin-left: 10px; background-color: #f59e0b;">
-                            <i class="fas fa-undo"></i>
-                            <span>Reset</span>
+                    ${!isApproved && link.status !== 'rejected' ? `
+                        <button class="action-btn approve-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}">
+                            <i class="fas fa-check"></i>
+                            <span>Approve</span>
                         </button>
-                        ` : ''}
-                    </div>
+                        <button class="action-btn reject-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}">
+                            <i class="fas fa-times"></i>
+                            <span>Reject</span>
+                        </button>
+                    ` : `
+                        <div class="status-info">
+                            <span class="status-text">${statusText} on ${isApproved ? (link.approvedAt ? new Date(link.approvedAt.toDate()).toLocaleString() : 'Unknown') : (link.rejectedAt ? new Date(link.rejectedAt.toDate()).toLocaleString() : 'Unknown')}</span>
+                            ${isApproved ? `
+                            <button class="action-btn reset-btn" data-user-id="${link.userId}" data-task-id="${link.taskId}">
+                                <i class="fas fa-undo"></i>
+                                <span>Reset</span>
+                            </button>
+                            ` : ''}
+                        </div>
+                    `}
                 </div>
-                `}
             </div>
         `;
     }
@@ -3492,26 +3501,29 @@ Example:
         }
 
         timerViewContainer.innerHTML = `
-            <div class="space-y-6">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-2xl font-bold text-gray-900">Live Task Timers</h2>
-                    <div class="flex gap-2">
-                        <button onclick="window.adminHandler.refreshTimerView()" class="btn-primary">
-                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+            <div class="timer-management-container">
+                <div class="timer-header">
+                    <div class="header-left">
+                        <h2 class="section-title">Live Task Timers</h2>
+                        <p class="section-subtitle">Monitor active user task timers in real-time</p>
+                    </div>
+                    <div class="header-actions">
+                        <button onclick="window.adminHandler.refreshTimerView()" class="admin-action-btn">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
                         </button>
-                        <button onclick="window.adminHandler.startTimerAutoRefresh()" class="btn-secondary">
-                            <i class="fas fa-play mr-2"></i>Auto Refresh
+                        <button onclick="window.adminHandler.startTimerAutoRefresh()" class="admin-action-btn">
+                            <i class="fas fa-play"></i>
+                            Auto Refresh
                         </button>
-                        <button onclick="window.adminHandler.stopTimerAutoRefresh()" class="btn-warning">
-                            <i class="fas fa-pause mr-2"></i>Stop Auto Refresh
-                        </button>
-                        <button onclick="window.adminHandler.syncAllUserTimers()" class="btn-secondary">
-                            <i class="fas fa-sync-alt mr-2"></i>Sync All Timers
+                        <button onclick="window.adminHandler.stopTimerAutoRefresh()" class="admin-action-btn">
+                            <i class="fas fa-pause"></i>
+                            Stop Auto
                         </button>
                     </div>
                 </div>
 
-                <div class="grid gap-6">
+                <div class="timers-grid">
                     ${userTimerData.map(userData => this.renderUserTimerCard(userData)).join('')}
                 </div>
             </div>
@@ -3529,27 +3541,25 @@ Example:
         const activeTasks = totalTasks - expiredTasks;
 
         return `
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <div class="flex justify-between items-start mb-4">
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">${user.displayName || user.email}</h3>
-                        <p class="text-sm text-gray-500">${user.email}</p>
-                        <div class="flex gap-4 mt-2">
-                            <span class="text-sm text-green-600">
-                                <i class="fas fa-check-circle mr-1"></i>${activeTasks} Active
-                            </span>
-                            <span class="text-sm text-red-600">
-                                <i class="fas fa-clock mr-1"></i>${expiredTasks} Expired
-                            </span>
-                        </div>
+            <div class="user-timer-card">
+                <div class="user-timer-header">
+                    <div class="user-info">
+                        <h3 class="user-name">${user.displayName || user.email}</h3>
+                        <p class="user-email">${user.email}</p>
                     </div>
-                    <div class="text-right">
-                        <span class="text-sm text-gray-500">User ID</span>
-                        <p class="text-xs text-gray-400 font-mono">${user.id}</p>
+                    <div class="user-stats">
+                        <span class="stat-item active">
+                            <i class="fas fa-check-circle"></i>
+                            ${activeTasks} Active
+                        </span>
+                        <span class="stat-item expired">
+                            <i class="fas fa-clock"></i>
+                            ${expiredTasks} Expired
+                        </span>
                     </div>
                 </div>
 
-                <div class="space-y-3">
+                <div class="timers-list">
                     ${timers.map(timer => this.renderTimerRow(timer, user.id)).join('')}
                 </div>
             </div>
@@ -3571,37 +3581,30 @@ Example:
                 'text-green-600 bg-green-100';
 
         return `
-            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div class="flex-1">
-                    <div class="flex items-center gap-3">
-                        <h4 class="font-medium text-gray-900">${timer.taskTitle}</h4>
-                        <span class="px-2 py-1 rounded-full text-xs font-medium ${statusColors[timer.status] || 'text-gray-600 bg-gray-100'}">
+            <div class="timer-row">
+                <div class="timer-info">
+                    <div class="timer-title-section">
+                        <h4 class="timer-title">${timer.taskTitle}</h4>
+                        <span class="timer-status ${statusColors[timer.status] || 'text-gray-600 bg-gray-100'}">
                             ${timer.status.replace('_', ' ').toUpperCase()}
                         </span>
                     </div>
-                    <div class="flex items-center gap-4 mt-1 text-xs text-gray-500">
-                        <span>Started: ${new Date(timer.startTime).toLocaleString()}</span>
-                        <span>Limit: ${timer.userTimeLimit ? Math.floor(timer.userTimeLimit / 60) + 'h' : 'N/A'}</span>
-                        ${timer.needsSync ? `<span class="text-orange-600 font-medium">⚠️ Sync Needed</span>` : `<span class="text-green-600">✅ Synced</span>`}
+                    <div class="timer-details">
+                        <span class="detail-item">Started: ${new Date(timer.startTime).toLocaleString()}</span>
+                        <span class="detail-item">Limit: ${timer.userTimeLimit ? Math.floor(timer.userTimeLimit / 60) + 'h' : 'N/A'}</span>
                     </div>
                 </div>
-                <div class="text-right">
-                    <div class="flex items-center gap-2">
-                        <span class="px-3 py-1 rounded-full text-sm font-bold ${timeColors}">
-                            ${timer.remainingTime}
-                        </span>
-                        ${timer.isExpired ? `
-                            <button onclick="window.adminHandler.restartUserTask('${timer.taskId}', '${userId}')" 
-                                    class="btn-warning text-xs px-2 py-1">
-                                <i class="fas fa-redo mr-1"></i>Restart
-                            </button>
-                        ` : ''}
-                    </div>
+                <div class="timer-actions">
+                    <span class="timer-countdown ${timeColors}">
+                        ${timer.remainingTime}
+                    </span>
                     ${timer.isExpired ? `
-                        <p class="text-xs text-red-500 mt-1">Time Expired</p>
-                    ` : `
-                        <p class="text-xs text-gray-500 mt-1">Remaining</p>
-                    `}
+                        <button onclick="window.adminHandler.restartUserTask('${timer.taskId}', '${userId}')" 
+                                class="restart-btn">
+                            <i class="fas fa-redo"></i>
+                            Restart
+                        </button>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -3703,7 +3706,7 @@ Example:
                 }
             }
 
-            this.showToast(`Synced ${syncedCount} user timers. Users will need to refresh to update their timers.`, 'success');
+            this.showToast(`Updated ${syncedCount} user timers successfully.`, 'success');
             this.loadAdminTimerView(); // Refresh the view
 
         } catch (error) {
