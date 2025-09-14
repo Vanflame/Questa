@@ -5,8 +5,102 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Questa - Admin Panel</title>
-    <link href="./assets/css/styles.css" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" href="/assets/images/logo.png">
+    <link rel="manifest" href="/manifest.json">
+    <link href="/assets/css/styles.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Enhanced Admin Styling */
+        .admin-task-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .admin-task-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        .task-image-container {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .task-image-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .admin-task-card:hover .task-image-container::after {
+            opacity: 1;
+        }
+
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .admin-action-btn {
+            position: relative;
+            overflow: hidden;
+            border: none;
+            outline: none;
+        }
+
+        .admin-action-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .admin-action-btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .admin-action-btn:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .admin-action-btn:focus {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+        }
+
+        .delete-task-btn:focus {
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3);
+        }
+
+        .status-badge {
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .task-stats-card {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border: 1px solid #e2e8f0;
+        }
+
+        .task-stats-card:hover {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+        }
+    </style>
 </head>
 
 <body class="bg-gray-50">
@@ -16,7 +110,7 @@
             <div class="admin-nav-content">
                 <div class="admin-nav-left">
                     <div class="admin-logo-section">
-                        <img src="./assets/images/logo.png" alt="Questa Logo" class="admin-logo-img">
+                        <img src="/assets/images/logo.png" alt="Questa Logo" class="admin-logo-img">
                         <div class="admin-logo-text">
                             <span class="admin-brand-name">Questa</span>
                             <span class="admin-brand-subtitle">Admin Panel</span>
@@ -225,8 +319,10 @@
                 <div class="bg-white shadow rounded-lg p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-lg font-medium text-gray-900">Task Management</h3>
-                        <button id="add-task-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
-                            Add New Task
+                        <button id="add-task-btn"
+                            class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center gap-2">
+                            <i class="fas fa-plus"></i>
+                            <span>Add New Task</span>
                         </button>
                     </div>
                     <div id="admin-tasks-list">
@@ -710,14 +806,14 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
     <!-- App Scripts -->
-    <script src="./assets/js/firebase-config.js"></script>
-    <script src="./assets/js/supabase-config.js"></script>
-    <script src="./assets/js/supabase-storage.js"></script>
-    <script src="./assets/js/auth.js"></script>
-    <script src="./assets/js/firestore.js"></script>
-    <script src="./assets/js/storage.js"></script>
-    <script src="./assets/js/admin.js"></script>
-    <script src="./assets/js/admin-handler.js"></script>
+    <script src="/assets/js/firebase-config.js"></script>
+    <script src="/assets/js/supabase-config.js"></script>
+    <script src="/assets/js/supabase-storage.js"></script>
+    <script src="/assets/js/auth.js"></script>
+    <script src="/assets/js/firestore.js"></script>
+    <script src="/assets/js/storage.js"></script>
+    <script src="/assets/js/admin.js"></script>
+    <script src="/assets/js/admin-handler.js"></script>
 </body>
 
 </html>

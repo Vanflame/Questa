@@ -1542,13 +1542,19 @@ class DashboardHandler {
         // Get completion count display
         const completionCount = task.completionCount || 0;
         const maxCompletions = task.maxCompletions || 1;
-        // Always show completion count, even if maxCompletions is 1
+        // Show completion count in X/Y format
         const completionText = `${completionCount}/${maxCompletions}`;
 
         return `
             <div class="task-card-modern ${statusConfig.class}" onclick="window.dashboardHandler.openTaskDetail('${task.id}')">
                 <div class="task-card-header">
-                    <img src="${task.banner || '/placeholder-banner.jpg'}" alt="${task.title}" class="task-banner">
+                    ${task.banner ? `
+                        <img src="${task.banner}" alt="${task.title}" class="task-banner">
+                    ` : `
+                        <div class="task-hexagon-icon">
+                            ${task.title.charAt(0).toUpperCase()}
+                        </div>
+                    `}
                     <div class="task-status-overlay">
                         <span class="task-status-badge ${statusConfig.badgeClass}">
                             ${statusConfig.icon} ${statusConfig.label}
@@ -1596,6 +1602,20 @@ class DashboardHandler {
                         <div class="task-completion">
                             <i class="fas fa-trophy"></i>
                             <span class="completion-text">${completionText}</span>
+                        </div>
+                    </div>
+                    <div class="task-details-section">
+                        <div class="task-detail-item">
+                            <span class="detail-label">Max Completions:</span>
+                            <span class="detail-value">${maxCompletions}</span>
+                        </div>
+                        <div class="task-detail-item">
+                            <span class="detail-label">Difficulty:</span>
+                            <span class="detail-value">${difficultyStars}</span>
+                        </div>
+                        <div class="task-detail-item">
+                            <span class="detail-label">Created:</span>
+                            <span class="detail-value">${task.createdAt ? new Date(task.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}</span>
                         </div>
                     </div>
                     <div class="task-action-section">
@@ -4269,7 +4289,7 @@ class DashboardHandler {
     signOut() {
         auth.signOut().then(() => {
             this.showToast('Successfully signed out!', 'success');
-            window.location.href = 'login.html';
+            window.location.href = '/login/';
         }).catch((error) => {
             console.error('Sign-out error:', error);
             this.showToast('Failed to sign out: ' + error.message, 'error');

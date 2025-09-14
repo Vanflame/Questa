@@ -35,7 +35,7 @@
 
 ## 🚀 Live Demo
 
-**🔗 [Try Questa Now](https://questaearns.shop/)**
+**🔗 [Try Questa Now](https://your-username.github.io/your-repo-name)**
 
 ### Demo Accounts
 - **User Account**: `demo@questa.com` / `demo123`
@@ -283,5 +283,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Made with ❤️ for the gaming community**
 
 </div>
-
-

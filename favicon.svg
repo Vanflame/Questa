@@ -1,0 +1,9 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Red Check Mark with Circle Outline -->
+  <g transform="translate(16, 16)">
+    <!-- Outer Circle -->
+    <circle cx="0" cy="0" r="12" fill="none" stroke="#FF4444" stroke-width="3"/>
+    <!-- Check Mark -->
+    <path d="M -6 -2 L -2 2 L 8 -8" stroke="#FF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

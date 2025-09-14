@@ -90,27 +90,81 @@ class AdminManager {
     }
 
     createAdminTaskCard(task) {
+        const statusColor = task.status === 'active' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-800 border-gray-200';
+        const statusIcon = task.status === 'active' ? 'fas fa-check-circle' : 'fas fa-pause-circle';
+
+        // Format user time limit
+        const formatUserTimeLimit = (userTimeLimit) => {
+            if (!userTimeLimit) return 'No Limit';
+            const minutes = userTimeLimit;
+            if (minutes < 60) return `${minutes}m`;
+            if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+            return `${Math.floor(minutes / 1440)}d`;
+        };
+
+        // Format difficulty with stars
+        const formatDifficulty = (difficulty) => {
+            const stars = {
+                'easy': '⭐',
+                'medium': '⭐⭐',
+                'hard': '⭐⭐⭐',
+                'expert': '⭐⭐⭐⭐'
+            };
+            return stars[difficulty] || '⭐⭐';
+        };
+
         return `
-            <div class="bg-white border rounded-lg p-6 shadow-sm">
+            <div class="admin-task-card bg-white border border-gray-200 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 overflow-hidden">
+                <!-- Header Section -->
                 <div class="relative">
-                    <img src="${task.banner || '/placeholder-banner.jpg'}" alt="${task.title}" class="w-full h-32 object-cover rounded-md mb-4">
-                    <span class="absolute top-2 right-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                        ${task.status}
+                    <div class="h-32 bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center">
+                        ${task.banner ?
+                `<img src="${task.banner}" alt="${task.title}" class="w-full h-full object-cover">` :
+                `<div class="text-white text-4xl opacity-80"><i class="fas fa-gamepad"></i></div>`
+            }
+                    </div>
+                    <span class="absolute top-2 right-2 ${statusColor} text-xs px-2 py-1 rounded-full font-medium">
+                        ${task.status.toUpperCase()}
                     </span>
                 </div>
                 
-                <h3 class="text-lg font-semibold text-gray-900 mb-2">${task.title}</h3>
-                <p class="text-2xl font-bold text-green-600 mb-4">₱${task.reward}</p>
-                
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-500">
-                        Created: ${new Date(task.createdAt?.toDate()).toLocaleDateString()}
-                    </span>
-                    <div class="admin-actions">
-                        <button class="edit-task-btn text-blue-600 hover:text-blue-800 text-sm" data-task-id="${task.id}">
+                <!-- Content Section -->
+                <div class="p-4">
+                    <!-- Title and Reward -->
+                    <div class="mb-3">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-1 line-clamp-1">${task.title}</h3>
+                        <div class="flex items-center gap-1">
+                            <i class="fas fa-coins text-green-600 text-sm"></i>
+                            <span class="text-lg font-bold text-green-600">₱${task.reward}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Key Stats -->
+                    <div class="grid grid-cols-2 gap-2 mb-3 text-sm">
+                        <div class="flex items-center gap-1">
+                            <span class="text-gray-500">Duration:</span>
+                            <span class="font-medium">${task.duration || '7'}d</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-gray-500">User Time:</span>
+                            <span class="font-medium">${formatUserTimeLimit(task.userTimeLimit)}</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-gray-500">Difficulty:</span>
+                            <span class="font-medium">${formatDifficulty(task.difficulty || 'medium')}</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-gray-500">Created:</span>
+                            <span class="font-medium">${new Date(task.createdAt?.toDate()).toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="flex gap-2 pt-3 border-t border-gray-100">
+                        <button class="edit-task-btn flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-task-id="${task.id}">
                             <i class="fas fa-edit mr-1"></i>Edit
                         </button>
-                        <button class="delete-task-btn text-red-600 hover:text-red-800 text-sm ml-2" data-task-id="${task.id}">
+                        <button class="delete-task-btn flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-task-id="${task.id}">
                             <i class="fas fa-trash mr-1"></i>Delete
                         </button>
                     </div>

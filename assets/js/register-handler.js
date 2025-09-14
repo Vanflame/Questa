@@ -192,7 +192,7 @@ class RegisterHandler {
                 // Default to dashboard if admin check fails
                 if (!window.location.pathname.includes('/dashboard/')) {
                     setTimeout(() => {
-                        window.location.href = 'dashboard.html';
+                        window.location.href = '/dashboard/';
                     }, 1000);
                 }
             });

@@ -732,29 +732,84 @@ body {
 
 /* Modern Task Card Design */
 .task-card-modern {
-    background: rgba(255, 255, 255, 0.9);
-    backdrop-filter: blur(20px);
+    background: #ffffff;
     border-radius: 16px;
     overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: all 0.3s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     height: 100%;
-    min-height: 380px;
+    min-height: 320px;
+    position: relative;
+}
+
+.task-card-modern::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+    z-index: 1;
 }
 
 .task-card-modern:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    border-color: #3b82f6;
+}
+
+.task-card-modern:hover::before {
+    transform: scaleX(1);
 }
 
 .task-card-header {
     position: relative;
-    height: 200px;
+    height: 120px;
     overflow: hidden;
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.task-card-header:has(.task-banner) {
+    padding: 0;
+    background: none;
+}
+
+.task-card-header:has(.task-banner) .task-banner {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.task-hexagon-icon {
+    width: 60px;
+    height: 60px;
+    position: relative;
+    background: white;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: #1e293b;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.task-status-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
 }
 
 .task-banner {
@@ -1339,11 +1394,11 @@ body {
 }
 
 .task-card-content {
-    padding: 1.5rem;
+    padding: 16px;
     display: flex;
     flex-direction: column;
     flex: 1;
-    gap: 1rem;
+    gap: 12px;
 }
 
 .task-title-section {
@@ -1372,31 +1427,29 @@ body {
 .task-info-section {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 1rem;
-    padding: 1.25rem;
-    background: rgba(102, 126, 234, 0.05);
-    border-radius: 16px;
-    border: 1px solid rgba(102, 126, 234, 0.1);
-    margin: 1rem 0;
+    gap: 12px;
+    padding: 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
 }
 
 .task-reward {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.375rem;
+    gap: 4px;
     text-align: center;
 }
 
 .task-reward i {
     color: #059669;
-    font-size: 1.25rem;
-    margin-bottom: 0.25rem;
+    font-size: 16px;
 }
 
 .reward-amount {
-    font-size: 1.125rem;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 600;
     color: #059669;
     margin: 0;
 }
@@ -1405,19 +1458,18 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.375rem;
+    gap: 4px;
     text-align: center;
 }
 
 .task-duration i {
     color: #6b7280;
-    font-size: 1.25rem;
-    margin-bottom: 0.25rem;
+    font-size: 16px;
 }
 
 .duration-text {
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 500;
     color: #6b7280;
     margin: 0;
 }
@@ -1426,18 +1478,17 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.375rem;
+    gap: 4px;
     text-align: center;
 }
 
 .task-completion i {
     color: #3b82f6;
-    font-size: 1.25rem;
-    margin-bottom: 0.25rem;
+    font-size: 16px;
 }
 
 .completion-text {
-    font-size: 0.875rem;
+    font-size: 14px;
     font-weight: 600;
     color: #3b82f6;
     margin: 0;
@@ -1502,23 +1553,88 @@ body {
     margin: 0;
 }
 
+.task-details-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+.task-detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+}
+
+.detail-label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.detail-value {
+    color: #334155;
+    font-weight: 600;
+}
+
 .task-action-section {
     margin-top: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.task-action-btn.btn-primary {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+}
+
+.task-action-btn.btn-primary:hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+}
+
+.task-action-btn.btn-danger {
+    background: #ef4444;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+}
+
+.task-action-btn.btn-danger:hover {
+    background: #dc2626;
+    transform: translateY(-1px);
 }
 
 .task-action-btn {
     width: 100%;
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
     border: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 8px;
 }
 
 .task-action-btn:disabled {
@@ -4109,6 +4225,20 @@ button:disabled:hover,
     background: #9ca3af !important;
     transform: none !important;
     box-shadow: none !important;
+}
+
+/* Ensure admin buttons are not affected by disabled styles unless explicitly disabled */
+#add-task-btn:not(:disabled) {
+    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%) !important;
+    color: white !important;
+    opacity: 1 !important;
+    cursor: pointer !important;
+}
+
+#add-task-btn:not(:disabled):hover {
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4) !important;
 }
 
 /* Task Card States */

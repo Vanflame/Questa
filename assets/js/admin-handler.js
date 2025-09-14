@@ -193,7 +193,9 @@ class AdminHandler {
                 console.log('🔍 Approve Immutable link button clicked:', userId, taskId);
                 console.log('🔍 Button element:', button);
                 console.log('🔍 Event target:', e.target);
+                e.stopPropagation(); // Prevent other handlers from running
                 this.approveImmutableLink(userId, taskId);
+                return; // Exit early to prevent other handlers
             }
 
             // Reject Immutable link button (only for immutable link cards)
@@ -203,7 +205,9 @@ class AdminHandler {
                 const userId = button.getAttribute('data-user-id');
                 const taskId = button.getAttribute('data-task-id');
                 console.log('Reject Immutable link button clicked:', userId, taskId);
+                e.stopPropagation(); // Prevent other handlers from running
                 this.showRejectImmutableModal(userId, taskId);
+                return; // Exit early to prevent other handlers
             }
 
             // Copy Immutable link button
@@ -635,10 +639,76 @@ class AdminHandler {
         } else {
             // Default to days if no userTimeLimit is set
             timeLimitTypeSelect.value = 'days';
+            durationInput.value = task.duration || 7;
         }
+
+        console.log('🔍 InitializeEditTimeLimitType Debug:', {
+            taskId: task.id,
+            userTimeLimit: task.userTimeLimit,
+            duration: task.duration,
+            finalDurationValue: durationInput.value,
+            finalTimeLimitType: timeLimitTypeSelect.value
+        });
 
         // Trigger the toggle function to update the form
         this.toggleEditTimeLimitType();
+    }
+
+    calculateDeadlineDisplay(deadline) {
+        try {
+            if (!deadline) return 'No Deadline';
+
+            let deadlineDate;
+
+            // Handle Firestore Timestamp with toDate method
+            if (deadline.toDate && typeof deadline.toDate === 'function') {
+                deadlineDate = deadline.toDate();
+            }
+            // Handle Firestore Timestamp with seconds/nanoseconds
+            else if (deadline.seconds && typeof deadline.seconds === 'number') {
+                deadlineDate = new Date(deadline.seconds * 1000);
+            }
+            // Handle regular Date or string
+            else {
+                deadlineDate = new Date(deadline);
+            }
+
+            const now = new Date();
+            const diffMs = deadlineDate - now;
+
+            if (diffMs <= 0) {
+                return 'Expired';
+            }
+
+            const diffMinutes = Math.floor(diffMs / (1000 * 60));
+            const diffHours = Math.floor(diffMinutes / 60);
+            const diffDays = Math.floor(diffHours / 24);
+
+            if (diffDays > 0) {
+                const remainingHours = diffHours % 24;
+                const remainingMinutes = diffMinutes % 60;
+
+                if (remainingHours > 0) {
+                    return `${diffDays}d ${remainingHours}h`;
+                } else if (remainingMinutes > 0) {
+                    return `${diffDays}d ${remainingMinutes}m`;
+                } else {
+                    return `${diffDays}d`;
+                }
+            } else if (diffHours > 0) {
+                const minutes = diffMinutes % 60;
+                if (minutes > 0) {
+                    return `${diffHours}h ${minutes}m`;
+                } else {
+                    return `${diffHours}h`;
+                }
+            } else {
+                return `${diffMinutes}m`;
+            }
+        } catch (error) {
+            console.error('Error calculating deadline display:', error, deadline);
+            return 'Error';
+        }
     }
 
     formatDateForInput(deadline) {
@@ -802,28 +872,108 @@ class AdminHandler {
     }
 
     createAdminTaskCard(task) {
+        const statusColor = task.status === 'active' ? 'bg-green-100 text-green-800 border-green-200' : 'bg-gray-100 text-gray-800 border-gray-200';
+        const statusIcon = task.status === 'active' ? 'fas fa-check-circle' : 'fas fa-pause-circle';
+
+        // Format user time limit
+        const formatUserTimeLimit = (userTimeLimit) => {
+            if (!userTimeLimit) return 'No Limit';
+            const minutes = userTimeLimit;
+            if (minutes < 60) return `${minutes}m`;
+            if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+            return `${Math.floor(minutes / 1440)}d`;
+        };
+
+        // Format difficulty with stars
+        const formatDifficulty = (difficulty) => {
+            const stars = {
+                'easy': '⭐',
+                'medium': '⭐⭐',
+                'hard': '⭐⭐⭐',
+                'expert': '⭐⭐⭐⭐'
+            };
+            return stars[difficulty] || '⭐⭐';
+        };
+
         return `
-            <div class="bg-white border rounded-lg p-6 shadow-sm">
-                <div class="relative">
-                    <img src="${task.banner || '/placeholder-banner.jpg'}" alt="${task.title}" class="w-full h-32 object-cover rounded-md mb-4">
-                    <span class="absolute top-2 right-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                        ${task.status}
-                    </span>
+            <div class="task-card-modern admin-task-card">
+                <div class="task-card-header">
+                    ${task.banner ? `
+                        <img src="${task.banner}" alt="${task.title}" class="task-banner">
+                    ` : `
+                        <div class="task-hexagon-icon">
+                            ${task.title.charAt(0).toUpperCase()}
+                        </div>
+                    `}
+                    <div class="task-status-overlay">
+                        <span class="task-status-badge status-available">
+                            <i class="fas fa-play"></i> ${task.status.toUpperCase()}
+                        </span>
+                    </div>
+                    ${task.deadline ? `
+                        <div class="task-deadline-timer" style="background: rgba(239, 68, 68, 0.9);">
+                            <i class="fas fa-clock"></i>
+                            <span class="deadline-text">${this.calculateDeadlineDisplay(task.deadline)}</span>
+                        </div>
+                    ` : ''}
+                    ${task.androidVersion ? `
+                        <div class="task-requirement-badge">
+                            <i class="fas fa-mobile-alt"></i>
+                            Android ${task.androidVersion}+
+                        </div>
+                    ` : `
+                        <div class="task-requirement-badge">
+                            <i class="fas fa-mobile-alt"></i>
+                            Android 14+
+                        </div>
+                    `}
+                    ${task.difficulty ? `
+                        <div class="task-difficulty-badge">
+                            ${formatDifficulty(task.difficulty)}
+                        </div>
+                    ` : ''}
                 </div>
-                
-                <h3 class="text-lg font-semibold text-gray-900 mb-2">${task.title}</h3>
-                <p class="text-2xl font-bold text-green-600 mb-4">₱${task.reward}</p>
-                
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-500">
-                        Created: ${new Date(task.createdAt?.toDate()).toLocaleDateString()}
-                    </span>
-                    <div class="admin-actions">
-                        <button class="edit-task-btn text-blue-600 hover:text-blue-800 text-sm" data-task-id="${task.id}">
-                            <i class="fas fa-edit mr-1"></i>Edit
+                <div class="task-card-content">
+                    <div class="task-title-section">
+                        <h3 class="task-title">${task.title}</h3>
+                        ${task.description ? `
+                            <p class="task-description">${task.description}</p>
+                        ` : ''}
+                    </div>
+                    <div class="task-info-section has-completion">
+                        <div class="task-reward">
+                            <i class="fas fa-coins"></i>
+                            <span class="reward-amount">₱${task.reward}</span>
+                        </div>
+                        <div class="task-duration">
+                            <i class="fas fa-clock"></i>
+                            <span class="duration-text">${formatUserTimeLimit(task.userTimeLimit)}</span>
+                        </div>
+                        <div class="task-completion">
+                            <i class="fas fa-trophy"></i>
+                            <span class="completion-text">${task.completionCount || 0}/${task.maxCompletions || 1}</span>
+                        </div>
+                    </div>
+                    <div class="task-details-section">
+                        <div class="task-detail-item">
+                            <span class="detail-label">Max Completions:</span>
+                            <span class="detail-value">${task.maxCompletions || 1}</span>
+                        </div>
+                        <div class="task-detail-item">
+                            <span class="detail-label">Difficulty:</span>
+                            <span class="detail-value">${formatDifficulty(task.difficulty || 'medium')} ${(task.difficulty || 'Medium').charAt(0).toUpperCase() + (task.difficulty || 'Medium').slice(1)}</span>
+                        </div>
+                        <div class="task-detail-item">
+                            <span class="detail-label">Created:</span>
+                            <span class="detail-value">${new Date(task.createdAt?.toDate()).toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                    <div class="task-action-section">
+                        <button class="task-action-btn btn-primary edit-task-btn" data-task-id="${task.id}">
+                            <i class="fas fa-edit"></i>Edit
                         </button>
-                        <button class="delete-task-btn text-red-600 hover:text-red-800 text-sm ml-2" data-task-id="${task.id}">
-                            <i class="fas fa-trash mr-1"></i>Delete
+                        <button class="task-action-btn btn-danger delete-task-btn" data-task-id="${task.id}">
+                            <i class="fas fa-trash"></i>Delete
                         </button>
                     </div>
                 </div>
@@ -1612,7 +1762,7 @@ Example:
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Duration</label>
-                                <input type="number" id="edit-task-duration" class="form-input" placeholder="Enter duration" min="1" max="365" value="${task.duration || 7}">
+                                <input type="number" id="edit-task-duration" class="form-input" placeholder="Enter duration" min="1" max="365">
                             </div>
                         </div>
                         <small class="form-hint" id="edit-duration-hint">How many days users have to complete this task</small>
@@ -2361,7 +2511,7 @@ Example:
     signOut() {
         auth.signOut().then(() => {
             this.showToast('Successfully signed out!', 'success');
-            window.location.href = 'login.html';
+            window.location.href = '/login/';
         }).catch((error) => {
             console.error('Sign-out error:', error);
             this.showToast('Failed to sign out: ' + error.message, 'error');
