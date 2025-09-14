@@ -19,6 +19,12 @@
     "background_color": "#ffffff",
     "theme_color": "#2563eb"
   },
+  "android": {
+    "package": "com.questa.earn",
+    "version_code": 1,
+    "min_sdk_version": 21,
+    "target_sdk_version": 34
+  },
   "lang": "en",
   "dir": "ltr",
   "icons": [
