@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Questa - Admin Panel</title>
+    <link href="./assets/css/styles.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="admin-navbar">
+        <div class="admin-nav-container">
+            <div class="admin-nav-content">
+                <div class="admin-nav-left">
+                    <div class="admin-logo-section">
+                        <img src="./assets/images/logo.png" alt="Questa Logo" class="admin-logo-img">
+                        <div class="admin-logo-text">
+                            <span class="admin-brand-name">Questa</span>
+                            <span class="admin-brand-subtitle">Admin Panel</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="admin-nav-right" id="nav-buttons">
+                    <button id="switch-to-user" class="admin-nav-btn admin-nav-btn-primary">
+                        <i class="fas fa-user admin-nav-icon"></i>
+                        <span class="admin-nav-text">User View</span>
+                    </button>
+                    <button id="logout-btn" class="admin-nav-btn admin-nav-btn-secondary">
+                        <i class="fas fa-sign-out-alt admin-nav-icon"></i>
+                        <span class="admin-nav-text">Logout</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Admin Panel Content -->
+    <div class="admin-content">
+        <!-- Admin Header -->
+        <div class="admin-header">
+            <div class="admin-title-section">
+                <h1 class="admin-title">Admin Dashboard</h1>
+                <p class="admin-subtitle">Manage your Questa platform</p>
+            </div>
+            <div class="admin-actions">
+                <button id="refresh-data-btn" class="admin-action-btn">
+                    <i class="fas fa-sync-alt"></i>
+                    Refresh Data
+                </button>
+            </div>
+        </div>
+
+        <!-- Admin Stats Cards -->
+        <div class="admin-stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="total-users">0</div>
+                    <div class="stat-label">Total Users</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-tasks"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="total-tasks">0</div>
+                    <div class="stat-label">Active Tasks</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="pending-verifications">0</div>
+                    <div class="stat-label">Pending Verifications</div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="stat-number" id="pending-withdrawals">0</div>
+                    <div class="stat-label">Pending Withdrawals</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Tab Navigation -->
+        <div class="admin-tabs">
+            <button class="admin-tab-btn active" data-admin-tab="overview">
+                <i class="fas fa-chart-pie"></i>
+                <span>Overview</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="tasks-admin">
+                <i class="fas fa-tasks"></i>
+                <span>Tasks</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="verifications">
+                <i class="fas fa-check-circle"></i>
+                <span>Verifications</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="withdrawals">
+                <i class="fas fa-money-bill-wave"></i>
+                <span>Withdrawals</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="immutable-links">
+                <i class="fas fa-link"></i>
+                <span>Immutable Links</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="quest-completions">
+                <i class="fas fa-trophy"></i>
+                <span>Quest Completions</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="users">
+                <i class="fas fa-users"></i>
+                <span>Users</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="timers">
+                <i class="fas fa-clock"></i>
+                <span>Live Timers</span>
+            </button>
+            <button class="admin-tab-btn" data-admin-tab="settings">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </button>
+        </div>
+
+        <!-- Admin Tab Content -->
+        <div class="admin-tab-content-container">
+            <!-- Overview Tab -->
+            <div id="overview-tab" class="admin-tab-content">
+                <div class="overview-grid">
+                    <!-- Recent Activity -->
+                    <div class="overview-card">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-history"></i>
+                                Recent Activity
+                            </h3>
+                        </div>
+                        <div class="card-content">
+                            <div id="recent-activity-list" class="activity-list">
+                                <!-- Recent activity will be populated -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="overview-card">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-bolt"></i>
+                                Quick Actions
+                            </h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="quick-actions">
+                                <button class="quick-action-btn"
+                                    onclick="window.adminHandler.switchAdminTab('tasks-admin')">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Add Task</span>
+                                </button>
+                                <button class="quick-action-btn"
+                                    onclick="window.adminHandler.switchAdminTab('verifications')">
+                                    <i class="fas fa-check"></i>
+                                    <span>Review Verifications</span>
+                                </button>
+                                <button class="quick-action-btn"
+                                    onclick="window.adminHandler.switchAdminTab('withdrawals')">
+                                    <i class="fas fa-money-bill"></i>
+                                    <span>Process Withdrawals</span>
+                                </button>
+                                <button class="quick-action-btn" onclick="window.adminHandler.switchAdminTab('users')">
+                                    <i class="fas fa-user-cog"></i>
+                                    <span>Manage Users</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Status -->
+                    <div class="overview-card">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-server"></i>
+                                System Status
+                            </h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="status-items">
+                                <div class="status-item">
+                                    <div class="status-indicator online"></div>
+                                    <span class="status-text">Database</span>
+                                    <span class="status-value">Online</span>
+                                </div>
+                                <div class="status-item">
+                                    <div class="status-indicator online"></div>
+                                    <span class="status-text">Storage</span>
+                                    <span class="status-value">Online</span>
+                                </div>
+                                <div class="status-item">
+                                    <div class="status-indicator online"></div>
+                                    <span class="status-text">Authentication</span>
+                                    <span class="status-value">Online</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tasks Management -->
+            <div id="tasks-admin-tab" class="admin-tab-content hidden">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Task Management</h3>
+                        <button id="add-task-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                            Add New Task
+                        </button>
+                    </div>
+                    <div id="admin-tasks-list">
+                        <!-- Admin task list will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Verifications Management -->
+            <div id="verifications-tab" class="admin-tab-content hidden">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Verification Management</h3>
+                    <div id="verifications-list">
+                        <!-- Verifications will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Withdrawals Management -->
+            <div id="withdrawals-tab" class="admin-tab-content hidden">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Withdrawal Management</h3>
+                        <div class="flex space-x-2">
+                            <select id="withdrawal-status-filter" class="form-select">
+                                <option value="all">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="paid">Completed</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                            <button id="refresh-withdrawals-btn"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                                <i class="fas fa-sync-alt mr-2"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div id="withdrawals-list">
+                        <!-- Withdrawals will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Immutable Links Management -->
+            <div id="immutable-links-tab" class="admin-tab-content hidden">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Immutable Links Review</h3>
+                        <div class="flex space-x-2">
+                            <select id="immutable-status-filter" class="form-select">
+                                <option value="all">All Status</option>
+                                <option value="pending">Pending Review</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                            <button id="refresh-immutable-links-btn"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                                <i class="fas fa-sync-alt mr-2"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div id="immutable-links-list">
+                        <!-- Immutable links will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quest Completions Management -->
+            <div id="quest-completions-tab" class="admin-tab-content hidden">
+                <div class="bg-white shadow rounded-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Quest Completions</h3>
+                        <div class="flex space-x-2">
+                            <select id="completion-filter" class="form-select">
+                                <option value="all">All Completions</option>
+                                <option value="today">Today</option>
+                                <option value="week">This Week</option>
+                                <option value="month">This Month</option>
+                            </select>
+                            <button id="refresh-completions-btn"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                                <i class="fas fa-sync-alt mr-2"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Quest Management Section -->
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                        <h4 class="text-md font-medium text-gray-900 mb-3">Quest Completion Limits</h4>
+                        <div id="quest-limits-list">
+                            <!-- Quest limits will be populated -->
+                        </div>
+                    </div>
+
+                    <div id="quest-completions-list">
+                        <!-- Quest completions will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Management -->
+            <div id="users-tab" class="admin-tab-content hidden">
+                <div class="user-management-container">
+                    <div class="user-management-header">
+                        <div class="header-left">
+                            <h3 class="section-title">User Management</h3>
+                            <p class="section-subtitle">Manage user accounts and view activities</p>
+                        </div>
+                        <div class="header-actions">
+                            <button id="refresh-users-btn" class="admin-action-btn">
+                                <i class="fas fa-sync-alt"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="user-filters">
+                        <div class="filter-group">
+                            <label class="filter-label">Status:</label>
+                            <select id="user-status-filter" class="filter-select">
+                                <option value="all">All Users</option>
+                                <option value="active">Active</option>
+                                <option value="disabled">Disabled</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label class="filter-label">Sort by:</label>
+                            <select id="user-sort-filter" class="filter-select">
+                                <option value="name">Name</option>
+                                <option value="balance">Balance</option>
+                                <option value="created">Join Date</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="users-grid" id="users-list">
+                        <!-- Users will be populated -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Timers Tab -->
+            <div id="timers-tab" class="admin-tab-content hidden">
+                <div id="admin-content">
+                    <!-- Timer content will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="settings-tab" class="admin-tab-content hidden">
+                <div class="settings-container">
+                    <div class="settings-header">
+                        <div class="header-left">
+                            <h3 class="section-title">System Settings</h3>
+                            <p class="section-subtitle">Configure system-wide settings and preferences</p>
+                        </div>
+                        <div class="header-actions">
+                            <button id="save-settings-btn" class="admin-action-btn">
+                                <i class="fas fa-save"></i>
+                                Save Settings
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="settings-content">
+                        <div class="settings-section">
+                            <h4 class="settings-section-title">
+                                <i class="fas fa-trophy"></i>
+                                Quest Settings
+                            </h4>
+                            <div class="settings-form">
+                                <div class="form-group">
+                                    <label class="form-label">Default Quest Completion Limit</label>
+                                    <input type="number" id="default-max-completions" class="form-input"
+                                        placeholder="Enter default max completions per quest" value="5">
+                                    <p class="form-help">How many times a user can complete each quest (default: 5)</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4 class="settings-section-title">
+                                <i class="fas fa-envelope"></i>
+                                Contact Information
+                            </h4>
+                            <div class="settings-form">
+                                <div class="form-group">
+                                    <label class="form-label">Support Email</label>
+                                    <input type="email" id="support-email" class="form-input"
+                                        placeholder="support@example.com">
+                                    <p class="form-help">This email will be used for contact support buttons throughout
+                                        the app</p>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Admin Email</label>
+                                    <input type="email" id="admin-email" class="form-input"
+                                        placeholder="admin@example.com">
+                                    <p class="form-help">Primary administrator email address</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4 class="settings-section-title">
+                                <i class="fas fa-globe"></i>
+                                Site Information
+                            </h4>
+                            <div class="settings-form">
+                                <div class="form-group">
+                                    <label class="form-label">Site Name</label>
+                                    <input type="text" id="site-name" class="form-input" placeholder="Questa">
+                                    <p class="form-help">The name of your application</p>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Site URL</label>
+                                    <input type="url" id="site-url" class="form-input"
+                                        placeholder="https://example.com">
+                                    <p class="form-help">Your website URL</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4 class="settings-section-title">
+                                <i class="fas fa-shield-alt"></i>
+                                Security Settings
+                            </h4>
+                            <div class="settings-form">
+                                <div class="form-group">
+                                    <label class="form-label">Withdrawal Cooldown (seconds)</label>
+                                    <input type="number" id="withdrawal-cooldown" class="form-input" placeholder="300"
+                                        min="0">
+                                    <p class="form-help">Time users must wait between withdrawal requests</p>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Max Withdrawal Amount (₱)</label>
+                                    <input type="number" id="max-withdrawal" class="form-input" placeholder="10000"
+                                        min="0">
+                                    <p class="form-help">Maximum amount users can withdraw in one request</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Activity Modal -->
+    <div id="user-activity-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-user"></i>
+                    User Activity
+                </h3>
+                <button id="close-activity-modal" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="user-info-section">
+                    <div class="user-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="user-details">
+                        <h4 id="activity-user-name">Loading...</h4>
+                        <p id="activity-user-email">Loading...</p>
+                        <p id="activity-user-balance">Loading...</p>
+                    </div>
+                </div>
+
+                <div class="activity-tabs">
+                    <button class="activity-tab-btn active" data-activity-tab="verifications">
+                        <i class="fas fa-check-circle"></i>
+                        Verifications
+                    </button>
+                    <button class="activity-tab-btn" data-activity-tab="withdrawals">
+                        <i class="fas fa-money-bill-wave"></i>
+                        Withdrawals
+                    </button>
+                </div>
+
+                <div class="activity-content">
+                    <div id="verifications-activity" class="activity-tab-content active">
+                        <div id="user-verifications-list" class="activity-list">
+                            <!-- User verifications will be populated -->
+                        </div>
+                    </div>
+                    <div id="withdrawals-activity" class="activity-tab-content hidden">
+                        <div id="user-withdrawals-list" class="activity-list">
+                            <!-- User withdrawals will be populated -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Balance Management Modal -->
+    <div id="balance-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-wallet"></i>
+                    Manage User Balance
+                </h3>
+                <button id="close-balance-modal" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <form id="balance-form" class="modal-form">
+                    <div class="form-group">
+                        <label class="form-label">User Email</label>
+                        <input type="email" id="balance-user-email" readonly class="form-input readonly">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Questa ID</label>
+                        <input type="text" id="balance-questa-id" readonly class="form-input readonly">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Current Balance</label>
+                        <input type="number" id="balance-current-amount" readonly class="form-input readonly">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Action</label>
+                        <select id="balance-action" required class="form-select">
+                            <option value="">Select action</option>
+                            <option value="add">➕ Add Amount</option>
+                            <option value="subtract">➖ Subtract Amount</option>
+                            <option value="set">🎯 Set Amount</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Amount (₱)</label>
+                        <input type="number" id="balance-amount" required class="form-input" placeholder="Enter amount"
+                            min="0" step="0.01">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Reason/Notes</label>
+                        <textarea id="balance-reason" class="form-textarea"
+                            placeholder="Reason for balance change (optional)"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="cancel-balance" class="btn-secondary">
+                            Cancel
+                        </button>
+                        <button type="submit" class="btn-primary">
+                            <i class="fas fa-save"></i>
+                            Update Balance
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Withdrawal Rejection Modal -->
+    <div id="reject-withdrawal-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 class="modal-title">❌ Reject Withdrawal</h3>
+                <button id="close-reject-modal" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <form id="reject-form" class="modal-form">
+                    <div class="form-group">
+                        <label class="form-label">User Email</label>
+                        <input type="email" id="reject-user-email" readonly class="form-input bg-gray-100">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Questa ID</label>
+                        <input type="text" id="reject-questa-id" readonly class="form-input bg-gray-100">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Withdrawal Amount</label>
+                        <input type="number" id="reject-amount" readonly class="form-input bg-gray-100">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Rejection Reason</label>
+                        <textarea id="reject-reason" required class="form-textarea"
+                            placeholder="Please provide a reason for rejection (user will see this)"></textarea>
+                        <small class="form-help">This message will be visible to the user</small>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" id="cancel-reject" class="btn-secondary">
+                    Cancel
+                </button>
+                <button type="submit" form="reject-form" class="btn-danger">
+                    <i class="fas fa-times"></i>
+                    Reject Withdrawal
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Immutable Link Rejection Modal -->
+    <div id="reject-immutable-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 class="modal-title">❌ Reject Immutable Link</h3>
+                <button id="close-reject-immutable-modal" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <form id="reject-immutable-form" class="modal-form">
+                    <div class="form-group">
+                        <label class="form-label">User Email</label>
+                        <input type="email" id="reject-immutable-user-email" readonly class="form-input bg-gray-100">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Task Title</label>
+                        <input type="text" id="reject-immutable-task-title" readonly class="form-input bg-gray-100">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Immutable Link</label>
+                        <textarea id="reject-immutable-link" readonly class="form-textarea bg-gray-100"
+                            rows="3"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Rejection Reason</label>
+                        <textarea id="reject-immutable-reason" required class="form-textarea"
+                            placeholder="Please provide a reason for rejection (user will see this)"></textarea>
+                        <small class="form-help">This message will be visible to the user</small>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" id="cancel-reject-immutable" class="btn-secondary">
+                    Cancel
+                </button>
+                <button type="submit" form="reject-immutable-form" class="btn-danger">
+                    <i class="fas fa-times"></i>
+                    Reject Link
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loading-spinner"
+        class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <div class="flex items-center space-x-3">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span class="text-gray-700">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <!-- Supabase Scripts -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <!-- App Scripts -->
+    <script src="./assets/js/firebase-config.js"></script>
+    <script src="./assets/js/supabase-config.js"></script>
+    <script src="./assets/js/supabase-storage.js"></script>
+    <script src="./assets/js/auth.js"></script>
+    <script src="./assets/js/firestore.js"></script>
+    <script src="./assets/js/storage.js"></script>
+    <script src="./assets/js/admin.js"></script>
+    <script src="./assets/js/admin-handler.js"></script>
+</body>
+
+</html>

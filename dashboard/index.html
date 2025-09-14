@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Questa - Dashboard</title>
+    <link href="./assets/css/styles.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="modern-dashboard">
+    <!-- Modern Navigation Bar -->
+    <nav class="modern-navbar">
+        <div class="nav-container">
+            <!-- Logo Section -->
+            <div class="nav-brand">
+                <div class="brand-logo">
+                    <img src="./assets/images/logo.png" alt="Questa" class="logo-img">
+                    <span class="brand-text">Questa</span>
+                </div>
+            </div>
+
+            <!-- Navigation Actions -->
+            <div class="nav-actions">
+                <!-- Balance Card -->
+                <div class="balance-card">
+                    <div class="balance-icon">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+                    <div class="balance-info">
+                        <span class="balance-label">Balance</span>
+                        <span id="user-balance" class="balance-amount">₱0</span>
+                    </div>
+                </div>
+
+                <!-- Notification Button -->
+                <button id="notification-btn" class="nav-action-btn notification-btn">
+                    <i class="fas fa-bell"></i>
+                    <span id="notification-badge" class="notification-badge hidden">0</span>
+                </button>
+
+                <!-- Profile Menu -->
+                <div class="profile-menu">
+                    <button id="profile-menu-btn" class="nav-action-btn profile-btn">
+                        <div class="profile-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <i class="fas fa-chevron-down profile-arrow"></i>
+                    </button>
+
+                    <!-- Profile Dropdown -->
+                    <div id="profile-dropdown" class="profile-dropdown hidden">
+                        <div class="dropdown-item" data-tab="profile">
+                            <i class="fas fa-user"></i>
+                            <span>Profile</span>
+                        </div>
+                        <div class="dropdown-item" data-tab="wallet">
+                            <i class="fas fa-wallet"></i>
+                            <span>Wallet</span>
+                        </div>
+                        <div class="dropdown-item" data-tab="activity">
+                            <i class="fas fa-history"></i>
+                            <span>Activity</span>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item logout-item" id="logout-btn">
+                            <i class="fas fa-sign-out-alt"></i>
+                            <span>Logout</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile Menu Button -->
+                <button id="mobile-menu-btn" class="nav-action-btn mobile-menu-btn">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile Menu Overlay -->
+    <div id="mobile-menu-overlay" class="mobile-menu-overlay hidden">
+        <div class="mobile-menu">
+            <div class="mobile-menu-header">
+                <div class="mobile-brand">
+                    <img src="logo.png" alt="Questa" class="mobile-logo">
+                    <span class="mobile-brand-text">Questa</span>
+                </div>
+                <button id="close-mobile-menu" class="close-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="mobile-menu-content">
+                <div class="mobile-menu-item" data-tab="profile">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </div>
+                <div class="mobile-menu-item" data-tab="tasks">
+                    <i class="fas fa-tasks"></i>
+                    <span>Tasks</span>
+                </div>
+                <div class="mobile-menu-item" data-tab="wallet">
+                    <i class="fas fa-wallet"></i>
+                    <span>Wallet</span>
+                </div>
+                <div class="mobile-menu-item" data-tab="activity">
+                    <i class="fas fa-history"></i>
+                    <span>Activity</span>
+                </div>
+                <div class="mobile-menu-item" data-tab="notifications">
+                    <i class="fas fa-bell"></i>
+                    <span>Notifications</span>
+                </div>
+
+                <div class="mobile-menu-divider"></div>
+
+                <div id="mobile-logout-btn" class="mobile-menu-item logout-item">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Content -->
+    <div class="dashboard-content">
+        <!-- Tab Content -->
+        <div class="tab-content-container">
+            <!-- Profile Tab -->
+            <div id="profile-tab" class="tab-content hidden">
+                <div class="profile-section">
+                    <!-- Profile Header -->
+                    <div class="profile-header">
+                        <div class="profile-avatar">
+                            <div class="avatar-circle">
+                                <i class="fas fa-user"></i>
+                            </div>
+                        </div>
+                        <div class="profile-details">
+                            <h1 id="profile-name" class="profile-name">Loading...</h1>
+                            <p id="user-email" class="profile-email">Loading...</p>
+                            <div class="profile-status">
+                                <span id="user-status" class="status-badge status-active">
+                                    <i class="fas fa-check-circle"></i>
+                                    Active
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-id-card"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-label">Questa ID</h3>
+                                <p id="user-questa-id" class="stat-value">Loading...</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card balance-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-wallet"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-label">Wallet Balance</h3>
+                                <p id="wallet-balance" class="stat-value balance">₱0</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-trophy"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-label">Quest Completions</h3>
+                                <p id="quest-completions" class="stat-value">0</p>
+                                <p class="stat-subtitle">Total completions</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-coins"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-label">Total Earned</h3>
+                                <p id="total-earned" class="stat-value">₱0</p>
+                                <p class="stat-subtitle">From all quests</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tasks Tab -->
+            <div id="tasks-tab" class="tab-content active">
+                <div class="tasks-section">
+                    <div class="section-header">
+                        <div class="header-content">
+                            <h1 class="section-title">Available Tasks</h1>
+                            <p class="section-subtitle">Complete tasks to earn rewards and grow your balance</p>
+                        </div>
+                        <div class="header-actions">
+                            <button class="refresh-btn" onclick="window.dashboardHandler.loadTasks()">
+                                <i class="fas fa-sync-alt"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="tasks-grid" id="tasks-grid">
+                        <!-- Task cards will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wallet Tab -->
+            <div id="wallet-tab" class="tab-content hidden">
+                <div class="wallet-section">
+                    <!-- Wallet Overview -->
+                    <div class="wallet-overview">
+                        <div class="wallet-balance-card-modern">
+                            <div class="balance-header">
+                                <div class="balance-icon-large">
+                                    <i class="fas fa-wallet"></i>
+                                </div>
+                                <div class="balance-info">
+                                    <h2 class="balance-title">Wallet Balance</h2>
+                                    <p class="balance-subtitle">Your current earnings</p>
+                                </div>
+                            </div>
+                            <div class="balance-display-modern">
+                                <div class="balance-amount-large" id="wallet-balance-display">₱0</div>
+                                <button id="withdraw-btn" class="withdraw-btn-modern">
+                                    <i class="fas fa-money-bill-wave"></i>
+                                    <span>Withdraw Funds</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transaction History -->
+                    <div class="transaction-history">
+                        <div class="section-header">
+                            <div class="header-content">
+                                <h2 class="section-title">Transaction History</h2>
+                                <p class="section-subtitle">Your recent transactions and earnings</p>
+                            </div>
+                        </div>
+                        <div class="history-content-modern" id="wallet-history">
+                            <!-- History will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Tab -->
+            <div id="activity-tab" class="tab-content hidden">
+                <div class="activity-section">
+                    <div class="section-header">
+                        <div class="header-content">
+                            <h1 class="section-title">Activity History</h1>
+                            <p class="section-subtitle">Your recent actions and transactions</p>
+                        </div>
+                    </div>
+                    <div class="activity-content-modern" id="activity-history">
+                        <!-- Activity will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notifications Tab -->
+            <div id="notifications-tab" class="tab-content hidden">
+                <div class="notifications-section">
+                    <div class="section-header">
+                        <div class="header-content">
+                            <h1 class="section-title">Notifications</h1>
+                            <p class="section-subtitle">Stay updated with your account</p>
+                        </div>
+                        <div class="header-actions">
+                            <button id="mark-all-read-btn" class="mark-all-read-btn-modern">
+                                <i class="fas fa-check-double"></i>
+                                <span>Mark all read</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="notifications-content-modern" id="notifications-list">
+                        <!-- Notifications will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Popup -->
+    <div id="notification-popup" class="notification-popup-modern hidden">
+        <div class="notification-popup-content">
+            <div class="notification-popup-header">
+                <div class="popup-title">
+                    <i class="fas fa-bell"></i>
+                    <span>Notifications</span>
+                </div>
+                <button id="close-notification-popup" class="close-popup-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="notification-popup-body">
+                <div class="notification-actions">
+                    <button id="popup-mark-all-read-btn" class="action-btn-small">
+                        <i class="fas fa-check-double"></i>
+                        <span>Mark all read</span>
+                    </button>
+                    <button id="view-all-notifications-btn" class="action-btn-small">
+                        <i class="fas fa-list"></i>
+                        <span>View all</span>
+                    </button>
+                </div>
+
+                <div class="notification-list-modern" id="notification-popup-list">
+                    <!-- Notifications will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Detail Modal -->
+    <div id="task-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+            <div class="mt-3">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-medium text-gray-900" id="task-modal-title">Task Details</h3>
+                    <button id="close-task-modal" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div id="task-modal-content">
+                    <!-- Content will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Withdrawal Modal -->
+    <div id="withdrawal-modal" class="modal-modern hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-container-modern">
+            <div class="modal-header-modern">
+                <div class="modal-title-section">
+                    <div class="modal-icon">
+                        <i class="fas fa-money-bill-wave"></i>
+                    </div>
+                    <div class="modal-title-content">
+                        <h3 class="modal-title">Withdraw Funds</h3>
+                        <p class="modal-subtitle">Request a withdrawal to your preferred method</p>
+                    </div>
+                </div>
+                <button id="close-withdrawal-modal" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="modal-body-modern">
+                <form id="withdrawal-form" class="modal-form-modern">
+                    <div class="form-group-modern">
+                        <label class="form-label-modern">Amount (₱)</label>
+                        <input type="number" id="withdrawal-amount" required class="form-input-modern"
+                            placeholder="Enter amount to withdraw" min="1">
+                    </div>
+
+                    <div class="form-group-modern">
+                        <label class="form-label-modern">Withdrawal Method</label>
+                        <select id="withdrawal-method" required class="form-select-modern">
+                            <option value="">Select withdrawal method</option>
+                            <option value="gcash">💳 GCash</option>
+                            <option value="bank">🏦 Bank Transfer</option>
+                            <option value="paypal">🌐 PayPal</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group-modern">
+                        <label class="form-label-modern">Account Details</label>
+                        <input type="text" id="withdrawal-account" required class="form-input-modern"
+                            placeholder="Enter phone number or account details">
+                        <small class="form-help-modern">Example: 09123456789 or Account Number</small>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer-modern">
+                <button type="button" id="cancel-withdrawal" class="btn-secondary-modern">
+                    Cancel
+                </button>
+                <button type="submit" form="withdrawal-form" class="btn-primary-modern">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Submit Request</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loading-spinner" class="loading-spinner-modern hidden">
+        <div class="loading-content">
+            <div class="loading-spinner-icon">
+                <div class="spinner"></div>
+            </div>
+            <div class="loading-text">
+                <span>Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <!-- Supabase Scripts -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <!-- App Scripts -->
+    <script src="./assets/js/firebase-config.js"></script>
+    <script src="./assets/js/supabase-config.js"></script>
+    <script src="./assets/js/supabase-storage.js"></script>
+    <script src="./assets/js/auth.js"></script>
+    <script src="./assets/js/firestore.js"></script>
+    <script src="./assets/js/storage.js"></script>
+    <script src="./assets/js/app.js"></script>
+    <script src="./assets/js/dashboard-handler.js"></script>
+</body>
+
+</html>
