@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Test - TaskEarn</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-xl font-bold text-blue-600">TaskEarn - Test</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="test-btn" class="bg-blue-600 text-white px-4 py-2 rounded">Test Button</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="main-content">
+        <!-- Login Page -->
+        <div id="login-page" class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+            <div class="max-w-md w-full space-y-8">
+                <div class="text-center">
+                    <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
+                        Login Test
+                    </h2>
+                    <button id="login-test-btn" class="mt-4 bg-blue-600 text-white px-6 py-2 rounded-md">
+                        Test Login
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard -->
+        <div id="dashboard" class="hidden">
+            <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+                <h2 class="text-2xl font-bold text-gray-900 mb-6">Dashboard Test</h2>
+
+                <!-- Tab Navigation -->
+                <div class="border-b border-gray-200">
+                    <nav class="-mb-px flex space-x-8">
+                        <button class="tab-btn active" data-tab="profile">
+                            <i class="fas fa-user mr-2"></i>Profile
+                        </button>
+                        <button class="tab-btn" data-tab="tasks">
+                            <i class="fas fa-tasks mr-2"></i>Tasks
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="mt-6">
+                    <!-- Profile Tab -->
+                    <div id="profile-tab" class="tab-content">
+                        <div class="bg-white shadow rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-gray-900 mb-4">Profile Overview</h3>
+                            <p class="text-gray-600">This is the profile tab content.</p>
+                        </div>
+                    </div>
+
+                    <!-- Tasks Tab -->
+                    <div id="tasks-tab" class="tab-content hidden">
+                        <div class="bg-white shadow rounded-lg p-6">
+                            <h3 class="text-lg font-medium text-gray-900 mb-4">Tasks</h3>
+                            <p class="text-gray-600">This is the tasks tab content.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Simple test script
+        console.log('🧪 Simple Test Page Loaded');
+
+        // Check elements
+        console.log('Elements found:', {
+            loginPage: !!document.getElementById('login-page'),
+            dashboard: !!document.getElementById('dashboard'),
+            profileTab: !!document.getElementById('profile-tab'),
+            tasksTab: !!document.getElementById('tasks-tab')
+        });
+
+        // Test button functionality
+        document.getElementById('login-test-btn').addEventListener('click', () => {
+            console.log('Login test button clicked');
+
+            // Hide login, show dashboard
+            document.getElementById('login-page').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+
+            console.log('Dashboard should now be visible');
+        });
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.getAttribute('data-tab');
+
+                // Update tab buttons
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Update tab content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.add('hidden');
+                });
+                document.getElementById(`${tabName}-tab`).classList.remove('hidden');
+
+                console.log('Switched to tab:', tabName);
+            });
+        });
+
+        // Test functions
+        window.testDashboard = () => {
+            document.getElementById('login-page').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            console.log('Dashboard shown via test function');
+        };
+    </script>
+</body>
+
+</html>
