@@ -1994,7 +1994,21 @@ Example:
             // Update task status based on verification phase
             if (verification.phase === 'initial') {
                 // Phase 1 approved - user can now proceed to DNS setup
+                console.log('🔍 Approving initial verification, updating task status to unlocked...');
+                console.log('🔍 User ID:', verification.userId, 'Task ID:', verification.taskId);
                 await window.firestoreManager.updateTaskStatus(verification.taskId, 'unlocked', verification.userId);
+                console.log('✅ Task status updated to unlocked');
+
+                // Create notification for user
+                const task = this.tasks.find(t => t.id === verification.taskId);
+                const taskTitle = task ? task.title : 'Unknown Task';
+
+                await window.firestoreManager.createAdminNotification(verification.userId, {
+                    type: 'verification_approved',
+                    title: '✅ Initial Verification Approved',
+                    message: `Your initial verification for "${taskTitle}" has been approved! You can now proceed to DNS setup.`,
+                    data: { taskId: verification.taskId, taskTitle: taskTitle, phase: 'initial' }
+                });
             } else if (verification.phase === 'final') {
                 // Final verification approved - credit user's wallet and mark complete
                 const task = this.tasks.find(t => t.id === verification.taskId);
@@ -2007,6 +2021,14 @@ Example:
                         reward: task.reward,
                         verificationId: verificationId,
                         completionType: 'final_verification'
+                    });
+
+                    // Create notification for user
+                    await window.firestoreManager.createAdminNotification(verification.userId, {
+                        type: 'verification_approved',
+                        title: '🎉 Task Completed!',
+                        message: `Congratulations! Your final verification for "${task.title}" has been approved! You've earned ₱${task.reward}.`,
+                        data: { taskId: verification.taskId, taskTitle: task.title, phase: 'final', reward: task.reward }
                     });
                 }
             }
@@ -2533,6 +2555,49 @@ Example:
             spinner.classList.remove('hidden');
         } else {
             spinner.classList.add('hidden');
+        }
+    }
+
+    // Modern loading modal functions
+    showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
+        // Remove existing loading modal if any
+        const existingModal = document.querySelector('.loading-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Create loading modal
+        const modal = document.createElement('div');
+        modal.className = 'loading-modal';
+        modal.innerHTML = `
+            <div class="loading-modal-content">
+                <div class="loading-spinner"></div>
+                <h3 class="loading-title">${title}</h3>
+                <p class="loading-message">${message}</p>
+                <div class="loading-progress">
+                    <div class="loading-progress-bar"></div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Show modal with animation
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+
+        return modal;
+    }
+
+    hideLoadingModal(modal) {
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
         }
     }
 
@@ -3706,7 +3771,8 @@ Example:
                 }
             }
 
-            this.showToast(`Updated ${syncedCount} user timers successfully.`, 'success');
+            // Silently update timers without showing toast message
+            console.log(`📊 Silently updated ${syncedCount} user timers`);
             this.loadAdminTimerView(); // Refresh the view
 
         } catch (error) {

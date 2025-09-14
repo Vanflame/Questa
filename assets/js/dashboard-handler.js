@@ -455,7 +455,12 @@ class DashboardHandler {
     }
 
     async loadTasks() {
+        let pageLoading = null;
+
         try {
+            // Show loading indicator
+            pageLoading = this.showPageLoading('Loading quests...');
+
             // Check if user is authenticated
             if (!this.currentUser) {
                 console.log('User not authenticated yet, waiting...');
@@ -544,6 +549,8 @@ class DashboardHandler {
             console.error('Error loading tasks:', error);
             this.showToast('Failed to load tasks: ' + error.message, 'error');
             this.renderTasks([]);
+        } finally {
+            this.hidePageLoading(pageLoading);
         }
 
         // Add debug function to window for testing
@@ -1374,8 +1381,9 @@ class DashboardHandler {
                     }
                 }
 
+                // Silently sync timers without showing toast message
                 if (syncedCount > 0) {
-                    this.showToast(`Updated ${syncedCount} existing timers successfully.`, 'success');
+                    console.log(`📊 Silently synced ${syncedCount} existing timers`);
                 }
 
             } catch (error) {
@@ -1865,9 +1873,9 @@ class DashboardHandler {
         }
     }
 
-    async getUserTaskStatus(taskId) {
+    async getUserTaskStatus(taskId, forceRefresh = false) {
         try {
-            console.log('🔍 Getting task status for user:', this.currentUser.uid, 'task:', taskId);
+            console.log('🔍 Getting task status for user:', this.currentUser.uid, 'task:', taskId, 'forceRefresh:', forceRefresh);
 
             // Check quest completion count and limits
             const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, taskId);
@@ -1889,10 +1897,30 @@ class DashboardHandler {
             // First check for custom task status (DNS setup, Immutable link, etc.)
             const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
             console.log('📊 Task status from taskStatuses collection:', taskStatus);
+            console.log('🔍 Task status exists:', !!taskStatus);
+            console.log('🔍 Task status.status:', taskStatus?.status);
+            console.log('🔍 Task status.phase:', taskStatus?.phase);
 
-            // If we have a custom task status, use it
-            if (taskStatus.status !== 'locked') {
+            // Debug: Let's also check the raw document to see what's actually in the database
+            if (forceRefresh) {
+                console.log('🔍 Force refresh: Checking raw database document...');
+                const rawDoc = await db.collection('taskStatuses').doc(`${this.currentUser.uid}_${taskId}`).get();
+                if (rawDoc.exists) {
+                    console.log('📄 Raw document data:', rawDoc.data());
+                } else {
+                    console.log('❌ No raw document found in taskStatuses collection');
+                }
+            }
+
+            // If we have a custom task status, use it (prioritize task status over verification status)
+            if (taskStatus.status && taskStatus.status !== 'locked') {
                 console.log('✅ Using task status from taskStatuses:', taskStatus.status);
+                console.log('🔍 Task status details:', {
+                    status: taskStatus.status,
+                    phase: taskStatus.phase,
+                    immutableLinkApproved: taskStatus.immutableLinkApproved,
+                    immutableLink: taskStatus.immutableLink ? 'Present' : 'Missing'
+                });
                 return {
                     ...taskStatus,
                     completionCount: completionCount,
@@ -1901,6 +1929,7 @@ class DashboardHandler {
             }
 
             console.log('⚠️ Task status was locked, falling back to verification-based status');
+            console.log('🔍 This should not happen if immutable link was approved!');
 
             // Fallback to verification-based status
             const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
@@ -2211,18 +2240,23 @@ class DashboardHandler {
                 existingModal.remove();
             }
 
-            // Get current task status
-            const taskStatus = await this.getUserTaskStatus(taskId);
-            console.log('Current task status:', taskStatus);
+            // Get current task status with force refresh
+            console.log('🔄 Getting fresh task status for task:', taskId);
+            const taskStatus = await this.getUserTaskStatus(taskId, true); // Force refresh
+            console.log('📊 Current task status:', taskStatus);
 
             if (taskStatus.status === 'available') {
                 // Show Phase 1 verification modal (Android version will be captured here)
+                console.log('🎯 Status is available, showing Phase 1 modal');
                 this.showPhase1VerificationModal(task);
             } else if (taskStatus.status === 'unlocked') {
                 // Show DNS setup step before Phase 2
+                console.log('🎯 Status is unlocked, showing DNS setup modal');
+                console.log('⚠️ This should not happen if immutable link is approved!');
                 this.showDNSSetupModal(task, taskId);
             } else if (taskStatus.status === 'dns_setup') {
                 // Show Immutable link capture step
+                console.log('🎯 Status is dns_setup, showing Immutable link modal');
                 this.showImmutableLinkModal(task);
             } else if (taskStatus.status === 'pending') {
                 // Show waiting message for admin review
@@ -2231,7 +2265,16 @@ class DashboardHandler {
             } else if (taskStatus.status === 'ready_for_phase2') {
                 // Show Phase 2 verification modal
                 console.log('🎯 Task status is ready_for_phase2, showing Phase 2 modal');
-                this.showPhase2VerificationModal(task);
+                console.log('🔍 Task status details:', taskStatus);
+
+                // Double-check that immutable link is approved
+                if (taskStatus.immutableLinkApproved) {
+                    this.showPhase2VerificationModal(task);
+                } else {
+                    console.log('⚠️ Status is ready_for_phase2 but immutableLinkApproved is not true');
+                    this.showToast('Immutable link approval is still pending. Please wait for admin approval.', 'warning');
+                    return;
+                }
             } else if (taskStatus.status === 'rejected_resubmission') {
                 // Show Phase 2 verification modal for resubmission
                 console.log('🎯 Task status is rejected_resubmission, showing Phase 2 modal for resubmission');
@@ -2882,6 +2925,8 @@ class DashboardHandler {
     }
 
     async submitImmutableLink(taskId) {
+        let loadingModal = null;
+
         try {
             const immutableLink = document.getElementById('immutable-link').value.trim();
 
@@ -2901,7 +2946,7 @@ class DashboardHandler {
                 return;
             }
 
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Submitting Immutable Link', 'Please wait while we process your submission...');
 
             // Store the Immutable link (now goes to pending admin review)
             await window.firestoreManager.storeImmutableLink(taskId, immutableLink);
@@ -2921,7 +2966,7 @@ class DashboardHandler {
             console.error('Error submitting Immutable link:', error);
             this.showToast('Failed to submit link: ' + error.message, 'error');
         } finally {
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -3280,8 +3325,11 @@ class DashboardHandler {
     }
 
     async submitPhase1Verification(taskId, modal) {
+        let loadingModal = null;
+
         try {
             console.log('🔄 Starting Phase 1 verification submission...');
+            loadingModal = this.showLoadingModal('Submitting Phase 1 Verification', 'Please wait while we process your verification...');
 
             const gameId = document.getElementById('game-id').value.trim();
             const androidVersion = document.getElementById('android-version').value;
@@ -3344,11 +3392,17 @@ class DashboardHandler {
             }
 
             this.showToast(`❌ ${errorMessage}`, 'error');
+        } finally {
+            this.hideLoadingModal(loadingModal);
         }
     }
 
     async submitPhase2Verification(taskId, modal) {
+        let loadingModal = null;
+
         try {
+            loadingModal = this.showLoadingModal('Submitting Phase 2 Verification', 'Please wait while we process your final verification...');
+
             const gameId = document.getElementById('game-id-phase2').value.trim();
             const notes = document.getElementById('phase2-notes').value.trim();
             const completionScreenshot = document.getElementById('completion-screenshot').files[0];
@@ -3397,6 +3451,8 @@ class DashboardHandler {
         } catch (error) {
             console.error('Error submitting Phase 2 verification:', error);
             this.showToast('Failed to submit verification: ' + error.message, 'error');
+        } finally {
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -3556,7 +3612,12 @@ class DashboardHandler {
     }
 
     async loadWalletHistory() {
+        let pageLoading = null;
+
         try {
+            // Show loading indicator
+            pageLoading = this.showPageLoading('Loading wallet history...');
+
             // Check if user is authenticated
             if (!this.currentUser) {
                 console.log('User not authenticated yet, waiting...');
@@ -3577,6 +3638,8 @@ class DashboardHandler {
         } catch (error) {
             console.error('Error loading wallet history:', error);
             this.showToast('Failed to load wallet history', 'error');
+        } finally {
+            this.hidePageLoading(pageLoading);
         }
     }
 
@@ -3956,6 +4019,8 @@ class DashboardHandler {
             submitBtn.style.opacity = '0.6';
         }
 
+        let loadingModal = null;
+
         try {
             const amount = parseFloat(document.getElementById('withdrawal-amount').value);
             const method = document.getElementById('withdrawal-method').value;
@@ -3973,7 +4038,7 @@ class DashboardHandler {
             }
 
             // Show loading
-            this.showLoading(true);
+            loadingModal = this.showLoadingModal('Processing Withdrawal', 'Please wait while we process your withdrawal request...');
 
             // Check if user has sufficient balance
             const user = await window.firestoreManager.getUser(this.currentUser.uid);
@@ -4014,7 +4079,7 @@ class DashboardHandler {
         } finally {
             // Reset flags and UI
             this.isSubmittingWithdrawal = false;
-            this.showLoading(false);
+            this.hideLoadingModal(loadingModal);
 
             // Clear localStorage
             localStorage.removeItem('isSubmittingWithdrawal');
@@ -4040,7 +4105,12 @@ class DashboardHandler {
 
     // Notifications
     async loadNotifications() {
+        let pageLoading = null;
+
         try {
+            // Show loading indicator
+            pageLoading = this.showPageLoading('Loading notifications...');
+
             // Check if user is authenticated
             if (!this.currentUser) {
                 console.log('User not authenticated yet, waiting...');
@@ -4070,9 +4140,49 @@ class DashboardHandler {
                     }
                 }, 2000); // Increased delay to 2 seconds for better database consistency
             }
+
+            // Check for immutable link approval notifications and refresh tasks if needed
+            const hasImmutableApproval = notifications.some(n => n.type === 'immutable_link_approved' && !n.read);
+            if (hasImmutableApproval) {
+                console.log('🔄 Immutable link approval notification found, refreshing tasks...');
+                console.log('📋 Immutable approval notifications:', notifications.filter(n => n.type === 'immutable_link_approved'));
+
+                // Force refresh tasks and wait a bit for database consistency
+                setTimeout(async () => {
+                    await this.loadTasks();
+                    console.log('✅ Tasks refreshed after immutable link approval notification');
+
+                    // Also force refresh the current tab if it's tasks tab
+                    if (document.getElementById('tasks-tab') && !document.getElementById('tasks-tab').classList.contains('hidden')) {
+                        console.log('🔄 Refreshing tasks tab display...');
+                        await this.loadTasks();
+                    }
+                }, 1000); // Shorter delay for immutable approvals
+            }
+
+            // Check for verification approval notifications and refresh tasks if needed
+            const hasVerificationApproval = notifications.some(n => n.type === 'verification_approved' && !n.read);
+            if (hasVerificationApproval) {
+                console.log('🔄 Verification approval notification found, refreshing tasks...');
+                console.log('📋 Verification approval notifications:', notifications.filter(n => n.type === 'verification_approved'));
+
+                // Force refresh tasks and wait a bit for database consistency
+                setTimeout(async () => {
+                    await this.loadTasks();
+                    console.log('✅ Tasks refreshed after verification approval notification');
+
+                    // Also force refresh the current tab if it's tasks tab
+                    if (document.getElementById('tasks-tab') && !document.getElementById('tasks-tab').classList.contains('hidden')) {
+                        console.log('🔄 Refreshing tasks tab display...');
+                        await this.loadTasks();
+                    }
+                }, 1000); // Shorter delay for verification approvals
+            }
         } catch (error) {
             console.error('Error loading notifications:', error);
             this.showToast('Failed to load notifications', 'error');
+        } finally {
+            this.hidePageLoading(pageLoading);
         }
     }
 
@@ -4302,6 +4412,87 @@ class DashboardHandler {
             spinner.classList.remove('hidden');
         } else {
             spinner.classList.add('hidden');
+        }
+    }
+
+    // Modern loading modal functions
+    showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
+        // Remove existing loading modal if any
+        const existingModal = document.querySelector('.loading-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Create loading modal
+        const modal = document.createElement('div');
+        modal.className = 'loading-modal';
+        modal.innerHTML = `
+            <div class="loading-modal-content">
+                <div class="loading-spinner"></div>
+                <h3 class="loading-title">${title}</h3>
+                <p class="loading-message">${message}</p>
+                <div class="loading-progress">
+                    <div class="loading-progress-bar"></div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Show modal with animation
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+
+        return modal;
+    }
+
+    hideLoadingModal(modal) {
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
+        }
+    }
+
+    showPageLoading(message = 'Loading...') {
+        // Remove existing page loading if any
+        const existingLoading = document.querySelector('.page-loading');
+        if (existingLoading) {
+            existingLoading.remove();
+        }
+
+        // Create page loading
+        const loading = document.createElement('div');
+        loading.className = 'page-loading';
+        loading.innerHTML = `
+            <div class="page-loading-content">
+                <div class="page-loading-spinner"></div>
+                <span class="page-loading-text">${message}</span>
+            </div>
+        `;
+
+        document.body.appendChild(loading);
+
+        // Show loading with animation
+        setTimeout(() => {
+            loading.classList.add('show');
+        }, 10);
+
+        return loading;
+    }
+
+    hidePageLoading(loading) {
+        if (loading) {
+            loading.classList.remove('show');
+            setTimeout(() => {
+                if (loading.parentNode) {
+                    loading.parentNode.removeChild(loading);
+                }
+            }, 200);
         }
     }
 

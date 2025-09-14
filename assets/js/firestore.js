@@ -369,11 +369,26 @@ class FirestoreManager {
 
             if (taskStatusDoc.exists) {
                 const taskStatus = taskStatusDoc.data();
+                console.log('🔍 Found task status document:', {
+                    userId: userId,
+                    taskId: taskId,
+                    status: taskStatus.status,
+                    phase: taskStatus.phase,
+                    immutableLinkApproved: taskStatus.immutableLinkApproved
+                });
                 return {
                     status: taskStatus.status,
                     phase: taskStatus.phase || null,
-                    verificationId: taskStatus.verificationId || null
+                    verificationId: taskStatus.verificationId || null,
+                    immutableLinkApproved: taskStatus.immutableLinkApproved || false,
+                    immutableLink: taskStatus.immutableLink || null,
+                    approvedAt: taskStatus.approvedAt || null,
+                    approvedBy: taskStatus.approvedBy || null,
+                    rejectedAt: taskStatus.rejectedAt || null,
+                    rejectedBy: taskStatus.rejectedBy || null
                 };
+            } else {
+                console.log('❌ No task status document found for:', `${userId}_${taskId}`);
             }
 
             // Fallback to verification-based status
@@ -458,7 +473,14 @@ class FirestoreManager {
                 console.log(`✅ Task completed, cleared start time for user: ${targetUserId}, task: ${taskId}`);
             }
 
+            console.log('🔍 Updating task status:', {
+                userId: targetUserId,
+                taskId: taskId,
+                status: status,
+                statusData: statusData
+            });
             await db.collection(this.collections.taskStatuses).doc(`${targetUserId}_${taskId}`).set(statusData, { merge: true });
+            console.log('✅ Task status document updated successfully');
 
             console.log(`Task status updated: ${taskId} -> ${status} for user: ${targetUserId}`);
         } catch (error) {
