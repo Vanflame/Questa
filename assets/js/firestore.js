@@ -362,21 +362,31 @@ class FirestoreManager {
     // Utility Methods
     async getTaskStatusForUser(userId, taskId) {
         try {
+            const docId = `${userId}_${taskId}`;
+            console.log('🔍 Getting task status for user:', { userId, taskId, docId });
+
             // First check for custom task status (DNS setup, Immutable link, etc.)
             const taskStatusDoc = await db.collection(this.collections.taskStatuses)
-                .doc(`${userId}_${taskId}`)
+                .doc(docId)
                 .get();
+
+            console.log('📄 Document exists:', taskStatusDoc.exists);
+            console.log('📄 Document ID:', taskStatusDoc.id);
 
             if (taskStatusDoc.exists) {
                 const taskStatus = taskStatusDoc.data();
                 console.log('🔍 Found task status document:', {
                     userId: userId,
                     taskId: taskId,
+                    docId: docId,
                     status: taskStatus.status,
                     phase: taskStatus.phase,
-                    immutableLinkApproved: taskStatus.immutableLinkApproved
+                    immutableLinkApproved: taskStatus.immutableLinkApproved,
+                    immutableLink: taskStatus.immutableLink ? 'Present' : 'Missing',
+                    rawData: taskStatus
                 });
-                return {
+
+                const result = {
                     status: taskStatus.status,
                     phase: taskStatus.phase || null,
                     verificationId: taskStatus.verificationId || null,
@@ -387,52 +397,18 @@ class FirestoreManager {
                     rejectedAt: taskStatus.rejectedAt || null,
                     rejectedBy: taskStatus.rejectedBy || null
                 };
+
+                console.log('📤 Returning task status:', result);
+                return result;
             } else {
-                console.log('❌ No task status document found for:', `${userId}_${taskId}`);
+                console.log('❌ No task status document found for:', docId);
                 // For new users with no task status document, return available status
                 // Don't fall back to verification logic to avoid status changes
                 return { status: 'available', phase: null };
             }
-
-            const verifications = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-
-            // Check for final verification approval
-            const finalVerification = verifications.find(v => v.phase === 'final' && v.status === 'approved');
-            if (finalVerification) {
-                return { status: 'complete', phase: 'final', verificationId: finalVerification.id };
-            }
-
-            // Check for final verification pending
-            const pendingFinal = verifications.find(v => v.phase === 'final' && v.status === 'pending');
-            if (pendingFinal) {
-                return { status: 'pending', phase: 'final', verificationId: pendingFinal.id };
-            }
-
-            // Check for initial verification approval
-            const approvedInitial = verifications.find(v => v.phase === 'initial' && v.status === 'approved');
-            if (approvedInitial) {
-                return { status: 'unlocked', phase: 'initial', verificationId: approvedInitial.id };
-            }
-
-            // Check for initial verification pending
-            const pendingInitial = verifications.find(v => v.phase === 'initial' && v.status === 'pending');
-            if (pendingInitial) {
-                return { status: 'pending', phase: 'initial', verificationId: pendingInitial.id };
-            }
-
-            // Check for initial verification rejection - allow resubmission
-            const rejectedInitial = verifications.find(v => v.phase === 'initial' && v.status === 'rejected');
-            if (rejectedInitial) {
-                return { status: 'rejected', phase: 'initial', verificationId: rejectedInitial.id };
-            }
-
-            return { status: 'locked', phase: null };
         } catch (error) {
             console.error('Error getting task status for user:', error);
-            return { status: 'locked', phase: null };
+            return { status: 'available', phase: null };
         }
     }
 
@@ -484,17 +460,39 @@ class FirestoreManager {
     async storeImmutableLink(taskId, immutableLink) {
         try {
             const userId = auth.currentUser.uid;
+            const docId = `${userId}_${taskId}`;
 
-            await db.collection(this.collections.taskStatuses).doc(`${userId}_${taskId}`).set({
+            console.log('🔍 Storing immutable link:', {
+                userId: userId,
+                taskId: taskId,
+                docId: docId,
+                immutableLink: immutableLink
+            });
+
+            const dataToStore = {
                 userId,
                 taskId,
                 immutableLink,
                 status: 'pending_immutable_review', // Set to pending until admin approval
+                phase: 'immutable_link', // Keep the phase
                 immutableLinkApproved: false, // Explicitly set to false for admin review
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            };
 
-            console.log(`Immutable link stored for task: ${taskId} - awaiting admin review`);
+            console.log('📝 Data to store:', dataToStore);
+
+            // Use set without merge to ensure status is overridden
+            await db.collection(this.collections.taskStatuses).doc(docId).update(dataToStore);
+
+            console.log(`✅ Immutable link stored for task: ${taskId} - awaiting admin review`);
+
+            // Verify the data was stored correctly
+            const verifyDoc = await db.collection(this.collections.taskStatuses).doc(docId).get();
+            if (verifyDoc.exists) {
+                console.log('✅ Verification - Document exists:', verifyDoc.data());
+            } else {
+                console.log('❌ Verification - Document does not exist!');
+            }
         } catch (error) {
             console.error('Error storing Immutable link:', error);
             throw error;

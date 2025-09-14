@@ -1212,7 +1212,8 @@ class DashboardHandler {
 
             return {
                 ...task,
-                userStatus: status,
+                userStatus: status, // status is already a string from getTaskStatusForUser
+                userStatusObject: status, // Keep the status string for reference
                 completionCount: completionCount,
                 maxCompletions: task.maxCompletions || 1
             };
@@ -1342,12 +1343,16 @@ class DashboardHandler {
         // Add function to sync timer data to database for admin integration
         window.syncTimerToDatabase = async (taskId, startTime) => {
             try {
-                // Update task status with start time for admin view
-                await window.firestoreManager.updateTaskStatus(taskId, 'unlocked', this.currentUser.uid, {
+                // Get current task status to preserve it
+                const currentStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
+                const statusToUse = currentStatus.status || 'unlocked'; // Preserve existing status
+
+                // Update task status with start time for admin view (preserve existing status)
+                await window.firestoreManager.updateTaskStatus(taskId, statusToUse, this.currentUser.uid, {
                     startedAt: new Date(startTime),
                     timerSynced: true
                 });
-                console.log(`📡 Synced timer for task ${taskId} to database`);
+                console.log(`📡 Synced timer for task ${taskId} to database (preserved status: ${statusToUse})`);
             } catch (error) {
                 console.error('Error syncing timer to database:', error);
             }
@@ -1371,12 +1376,13 @@ class DashboardHandler {
                         const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, task.id);
 
                         if (!taskStatus.startedAt) {
-                            await window.firestoreManager.updateTaskStatus(task.id, 'unlocked', this.currentUser.uid, {
+                            const statusToUse = taskStatus.status || 'unlocked'; // Preserve existing status
+                            await window.firestoreManager.updateTaskStatus(task.id, statusToUse, this.currentUser.uid, {
                                 startedAt: new Date(storedStartTime),
                                 timerSynced: true
                             });
                             syncedCount++;
-                            console.log(`📡 Synced existing timer for task ${task.title}`);
+                            console.log(`📡 Synced existing timer for task ${task.title} (preserved status: ${statusToUse})`);
                         }
                     }
                 }
@@ -1524,12 +1530,20 @@ class DashboardHandler {
         // Use the user status that was loaded
         const taskStatus = task.userStatus || 'available';
 
+        console.log('🎨 Creating task card for:', task.title, {
+            userStatus: task.userStatus,
+            userStatusObject: task.userStatusObject,
+            finalTaskStatus: taskStatus
+        });
+
         // Check if user time has expired
         const expiredKey = `task_expired_${task.id}_${this.currentUser.uid}`;
         const isUserTimeExpired = localStorage.getItem(expiredKey) === 'true';
 
         // Override status if user time expired
         const finalStatus = isUserTimeExpired ? 'expired' : taskStatus;
+
+        console.log('🎨 Final status for task card:', finalStatus);
 
         const statusConfig = this.getTaskStatusConfig(finalStatus, task.deadline);
 
@@ -1659,36 +1673,15 @@ class DashboardHandler {
             console.log(`📊 Task ${task.title} status from taskStatuses:`, taskStatus);
 
             // If we have a status from taskStatuses collection, use it
-            if (taskStatus && taskStatus.status && taskStatus.status !== 'locked') {
+            if (taskStatus && taskStatus.status && taskStatus.status !== 'available') {
                 console.log(`✅ Using taskStatuses status for ${task.title}:`, taskStatus.status);
                 console.log(`🔍 Full taskStatus object:`, taskStatus);
                 return taskStatus.status;
             }
 
-            // Fallback to verification-based status for backward compatibility
-            console.log(`⚠️ Falling back to verification-based status for ${task.title}`);
-            const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
-            const taskVerifications = verifications.filter(v => v.taskId === task.id);
-
-            if (taskVerifications.length === 0) {
-                return 'available';
-            }
-
-            const initialVerification = taskVerifications.find(v => v.phase === 'initial');
-            const finalVerification = taskVerifications.find(v => v.phase === 'final');
-
-            if (finalVerification && finalVerification.status === 'approved') {
-                return 'complete';
-            } else if (finalVerification && finalVerification.status === 'pending') {
-                return 'pending';
-            } else if (initialVerification && initialVerification.status === 'approved') {
-                return 'unlocked';
-            } else if (initialVerification && initialVerification.status === 'pending') {
-                return 'pending';
-            } else if (initialVerification && initialVerification.status === 'rejected') {
-                return 'rejected';
-            }
-
+            // If we reach here, it means no task status document exists
+            // This should only happen for completely new users
+            console.log(`📝 New user detected for ${task.title} - no task status document exists`);
             return 'available';
         } catch (error) {
             console.error('Error getting user task status:', error);
@@ -1863,7 +1856,7 @@ class DashboardHandler {
 
             // Force refresh task status
             console.log('🔄 Force refreshing task status...');
-            const taskStatus = await this.getUserTaskStatus(taskId);
+            const taskStatus = await this.getUserTaskStatus(taskId, true); // Force refresh
             console.log('📊 Final task status for modal:', taskStatus);
 
             this.showTaskDetailModal(task, taskStatus);
@@ -1960,23 +1953,30 @@ class DashboardHandler {
 
         modal.innerHTML = `
             <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-            <div class="modal-container task-detail-container">
+            <div class="modal-container max-w-4xl">
                 <div class="modal-header">
-                    <div>
-                        <h3 class="modal-title">${task.title}</h3>
-                        <div class="flex items-center mt-2">
-                            <span class="status-badge ${statusConfig.badgeClass} mr-3">
-                                ${statusConfig.icon} ${statusConfig.label}
-                            </span>
-                            <span class="text-2xl font-bold text-green-600">₱${task.reward}</span>
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-tasks text-blue-600 text-xl"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h3 class="modal-title text-xl font-semibold text-gray-900 mb-2">${task.title}</h3>
+                                <div class="flex items-center space-x-3">
+                                    <span class="status-badge ${statusConfig.badgeClass}">
+                                        ${statusConfig.icon} ${statusConfig.label}
+                                    </span>
+                                    <span class="text-lg font-bold text-green-600">₱${task.reward}</span>
+                                </div>
+                            </div>
                         </div>
+                        <button id="close-task-detail-modal" class="modal-close">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
                     </div>
-                    <button id="close-task-detail-modal" class="modal-close">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
                 </div>
 
                 <div class="modal-form">
@@ -2067,19 +2067,13 @@ class DashboardHandler {
                 return '';
             })()}
                             ${taskStatus.status === 'available' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-primary">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <polygon points="5,3 19,12 5,21"></polygon>
-                                    </svg>
+                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                    <i class="fas fa-play mr-2"></i>
                                     Start Task
                                 </button>
                             ` : taskStatus.status === 'unlocked' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-primary">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M9 12l2 2 4-4"></path>
-                                        <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                                        <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                                    </svg>
+                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                    <i class="fas fa-arrow-right mr-2"></i>
                                     Continue Task
                                 </button>
                             ` : taskStatus.status === 'pending' ? `
@@ -2091,22 +2085,14 @@ class DashboardHandler {
                                     <p class="text-sm text-yellow-700 mb-3">Your submission is currently being reviewed by our admin team. Please wait for approval.</p>
                                 </div>
                             ` : taskStatus.status === 'dns_setup' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-primary">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M9 12l2 2 4-4"></path>
-                                        <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                                        <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                                    </svg>
+                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                    <i class="fas fa-arrow-right mr-2"></i>
                                     Continue Task
                                 </button>
                             ` : taskStatus.status === 'ready_for_phase2' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-primary">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M9 12l2 2 4-4"></path>
-                                        <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                                        <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                                    </svg>
-                                    Continue Task
+                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                    <i class="fas fa-check-circle mr-2"></i>
+                                    Start Phase 2
                                 </button>
                             ` : taskStatus.status === 'complete' ? `
                                 <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
@@ -2119,8 +2105,8 @@ class DashboardHandler {
                                         <div class="text-sm text-green-600">
                                             <span class="font-medium">Completions:</span> ${taskStatus.completionCount || 0}/${taskStatus.maxCompletions || 1}
                                         </div>
-                                        <button onclick="window.dashboardHandler.restartQuest('${task.id}')" class="btn-success">
-                                            <i class="fas fa-redo mr-1"></i>
+                                        <button onclick="window.dashboardHandler.restartQuest('${task.id}')" class="btn btn-success">
+                                            <i class="fas fa-redo mr-2"></i>
                                             Restart Quest
                                         </button>
                                     </div>
@@ -2300,182 +2286,163 @@ class DashboardHandler {
 
         modal.innerHTML = `
             <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-            <div class="modal-container max-w-2xl">
-                <div class="modal-header">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                            <i class="fas fa-network-wired text-blue-600"></i>
+            <div class="modal-container-modern max-w-2xl">
+                <!-- Modal Header -->
+                <div class="modal-header-modern">
+                    <div class="modal-title-section">
+                        <div class="modal-icon">
+                            <i class="fas fa-network-wired"></i>
+                            </div>
+                        <div class="modal-title-content">
+                            <h3 class="modal-title">DNS Configuration</h3>
+                            <p class="modal-subtitle">${task.title}</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 class="modal-title text-xl font-semibold">DNS Configuration Required</h3>
-                            <p class="text-sm text-gray-600 mt-1">${task.title}</p>
-                        </div>
-                    </div>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                        </button>
                 </div>
                     
-                <div class="modal-body">
-                    <!-- Info Section -->
-                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                        <div class="flex items-start space-x-3">
-                            <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <i class="fas fa-info-circle text-blue-600 text-sm"></i>
+                <!-- Modal Body -->
+                <div class="modal-body-modern">
+                    <!-- Progress Indicator -->
+                    <div class="dns-progress-indicator">
+                        <div class="progress-steps">
+                            <div class="step active">
+                                <div class="step-number">1</div>
+                                <div class="step-label">Setup DNS</div>
                             </div>
-                            <div>
-                                <h4 class="text-blue-800 font-semibold mb-2">Private DNS Setup Required</h4>
-                                <p class="text-blue-700 text-sm leading-relaxed">
-                                    Configure your device's DNS settings to capture the Immutable link without auto-redirect.
-                                </p>
-                            </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">2</div>
+                                <div class="step-label">Verify</div>
                         </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">3</div>
+                                <div class="step-label">Continue</div>
                     </div>
-
-                    <!-- Instructions Section -->
-                    ${customInstructions ? `
-                        <div class="mb-4">
-                            <h4 class="text-sm font-semibold text-gray-900 mb-3">Custom DNS Setup Instructions</h4>
-                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                <pre class="text-sm text-gray-700 whitespace-pre-wrap">${customInstructions}</pre>
-                            </div>
-                        </div>
-                    ` : `
-                        <div class="mb-4">
-                            <h4 class="text-sm font-semibold text-gray-900 mb-3">Setup Instructions</h4>
-                            <div class="space-y-3">
-                                <div class="flex items-start space-x-3">
-                                    <div class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">1</div>
-                                    <div>
-                                        <p class="font-medium text-gray-900 text-sm">Open Android Settings</p>
-                                        <p class="text-xs text-gray-600">Settings → Network & Internet → Advanced</p>
                                     </div>
                                 </div>
 
-                                <div class="flex items-start space-x-3">
-                                    <div class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">2</div>
-                                    <div>
-                                        <p class="font-medium text-gray-900 text-sm">Select Private DNS</p>
-                                        <p class="text-xs text-gray-600">Tap on "Private DNS" option</p>
+                    <!-- Main Content -->
+                    <div class="dns-content">
+                        <!-- Setup Instructions -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-cog"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Setup Instructions</h4>
+                                    <p>Configure your device's DNS settings to capture the Immutable link</p>
                                     </div>
                                 </div>
                                 
-                                <div class="flex items-start space-x-3">
-                                    <div class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">3</div>
-                                    <div>
-                                        <p class="font-medium text-gray-900 text-sm">Choose Provider Hostname</p>
-                                        <p class="text-xs text-gray-600">Select "Private DNS provider hostname"</p>
+                            <div class="instructions-list">
+                                <div class="instruction-item">
+                                    <div class="instruction-number">1</div>
+                                    <div class="instruction-content">
+                                        <h5>Open Android Settings</h5>
+                                        <p>Go to Settings → Network & Internet → Advanced</p>
                                     </div>
                                 </div>
                                 
-                                <div class="flex items-start space-x-3">
-                                    <div class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">4</div>
-                                    <div>
-                                        <p class="font-medium text-gray-900 text-sm">Enter DNS Address</p>
-                                        <div class="mt-2">
-                                            <div class="bg-gray-100 border border-gray-300 rounded-lg p-3 font-mono text-sm">
-                                                <span class="text-gray-600">Enter this address:</span><br>
-                                                <span class="text-blue-600 font-semibold">${serverAddress}</span>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">2</div>
+                                    <div class="instruction-content">
+                                        <h5>Select Private DNS</h5>
+                                        <p>Tap on "Private DNS" option</p>
                                             </div>
                                         </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">3</div>
+                                    <div class="instruction-content">
+                                        <h5>Choose Provider Hostname</h5>
+                                        <p>Select "Private DNS provider hostname"</p>
                                     </div>
                                 </div>
                                 
-                                <div class="flex items-start space-x-3">
-                                    <div class="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-semibold">5</div>
-                                    <div>
-                                        <p class="font-medium text-gray-900 text-sm">Save Settings</p>
-                                        <p class="text-xs text-gray-600">Tap "Save" to apply the DNS settings</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `}
-
-                    <!-- Important Note -->
-                    <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-                        <div class="flex items-start space-x-3">
-                            <div class="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <i class="fas fa-check-circle text-green-600 text-xs"></i>
-                            </div>
-                            <div>
-                                <h4 class="text-green-800 font-semibold text-sm mb-1">Important</h4>
-                                <p class="text-green-700 text-xs">
-                                    DNS must be active before clicking the Immutable Connect link to prevent auto-redirect.
-                                </p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">4</div>
+                                    <div class="instruction-content">
+                                        <h5>Enter DNS Address</h5>
+                                        <div class="dns-address-box">
+                                            <div class="dns-address-label">Enter this address:</div>
+                                            <div class="dns-address-value">${serverAddress}</div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- DNS Verification Section -->
-                    <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                        <div class="flex items-center mb-3">
-                            <div class="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-shield-alt text-purple-600 text-sm"></i>
-                            </div>
-                            <div>
-                                <h4 class="text-purple-800 font-semibold text-sm">DNS Verification</h4>
-                                <p class="text-purple-700 text-xs">Verify your DNS configuration before proceeding</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">5</div>
+                                    <div class="instruction-content">
+                                        <h5>Save Settings</h5>
+                                        <p>Tap "Save" to apply the DNS settings</p>
                             </div>
                         </div>
+                    </div>
+                        </div>
                         
-                        <!-- DNS Server Address -->
-                        <div class="bg-white border border-gray-200 rounded-lg p-3 mb-3">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <span class="text-gray-600 text-xs font-medium">DNS Server Address:</span>
-                                    <div class="mt-1">
-                                        <span class="text-purple-600 font-semibold font-mono text-sm" id="dns-server-display">${serverAddress}</span>
+                        <!-- DNS Verification -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-shield-alt"></i>
                                     </div>
+                                <div class="section-title">
+                                    <h4>DNS Verification</h4>
+                                    <p>Verify your DNS configuration before proceeding</p>
                                 </div>
-                                <button type="button" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs px-3 py-1.5 rounded-md flex items-center space-x-1 transition-colors" onclick="window.dashboardHandler.copyDNSServer('${serverAddress}')">
-                                    <i class="fas fa-copy text-xs"></i>
-                                    <span>Copy</span>
+                            </div>
+                            
+                            <div class="verification-box">
+                                <div class="dns-server-display">
+                                    <div class="server-label">DNS Server Address:</div>
+                                    <div class="server-address">
+                                        <span id="dns-server-display">${serverAddress}</span>
+                                        <button type="button" class="copy-btn" onclick="window.dashboardHandler.copyDNSServer('${serverAddress}')">
+                                            <i class="fas fa-copy"></i>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Verify Button -->
-                        <div class="flex items-center space-x-3">
-                            <button type="button" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-md flex items-center space-x-2 transition-colors" onclick="window.dashboardHandler.checkDNSConfiguration('${serverAddress}')">
-                                <i class="fas fa-shield-alt text-sm"></i>
-                                <span>Verify DNS Configuration</span>
+                                <div class="verification-actions">
+                                    <button type="button" class="verify-btn" onclick="window.dashboardHandler.checkDNSConfiguration('${serverAddress}')">
+                                        <i class="fas fa-shield-alt"></i>
+                                Verify DNS Configuration
                             </button>
-                            <div id="dns-check-result" class="flex items-center space-x-2 min-h-[32px]">
+                                    <div id="dns-check-result" class="verification-result">
                                 <!-- DNS check result will appear here -->
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         
-                        <!-- Verification Note -->
-                        <div class="bg-white border border-gray-200 rounded-lg p-2 mt-3">
-                            <div class="flex items-start space-x-2">
-                                <div class="w-4 h-4 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                                    <i class="fas fa-info-circle text-blue-500 text-xs"></i>
-                                </div>
-                                <div class="text-xs text-gray-600">
-                                    <strong class="text-gray-800">Required:</strong> Verify that <code class="bg-gray-100 px-1 rounded text-xs">auth.immutable.com</code> is blocked to prevent auto-redirect.
+                        <!-- Important Notice -->
+                        <div class="important-notice">
+                            <div class="notice-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                    </div>
+                            <div class="notice-content">
+                                <h5>Important</h5>
+                                <p>DNS must be active before clicking the Immutable Connect link to prevent auto-redirect. Verify that auth.immutable.com is blocked.</p>
                                 </div>
                             </div>
                         </div>
-                    </div>
-
                 </div>
 
                 <!-- Modal Footer -->
-                <div class="modal-footer bg-gray-50 px-6 py-4 rounded-b-xl">
-                    <div class="flex items-center justify-between">
-                        <button type="button" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded-md flex items-center space-x-2 transition-colors" onclick="this.closest('.modal').remove()">
-                            <i class="fas fa-times text-sm"></i>
-                            <span>Cancel</span>
+                <div class="modal-footer-modern">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                            Cancel
                         </button>
-                        <button type="button" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2 rounded-md flex items-center space-x-2 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed" id="proceed-btn" data-task-id="${actualTaskId}" disabled>
-                            <i class="fas fa-arrow-right text-sm"></i>
-                            <span>Continue to Immutable Link</span>
+                    <button type="button" class="btn btn-primary" id="proceed-btn" data-task-id="${actualTaskId}" disabled>
+                        <i class="fas fa-arrow-right"></i>
+                            Continue to Immutable Link
                         </button>
-                    </div>
                 </div>
             </div>
         `;
@@ -2754,151 +2721,240 @@ class DashboardHandler {
 
         modal.innerHTML = `
             <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-            <div class="modal-container">
-                <div class="modal-header">
-                    <h3 class="modal-title">Capture Immutable Link - ${task.title}</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
+            <div class="modal-container-modern max-w-2xl">
+                <!-- Modal Header -->
+                <div class="modal-header-modern">
+                    <div class="modal-title-section">
+                        <div class="modal-icon">
+                            <i class="fas fa-link"></i>
+                            </div>
+                        <div class="modal-title-content">
+                            <h3 class="modal-title">Immutable Link Capture</h3>
+                            <p class="modal-subtitle">${task.title}</p>
+                            </div>
+                        </div>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                        </button>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body-modern">
+                    <!-- Progress Indicator -->
+                    <div class="dns-progress-indicator">
+                        <div class="progress-steps">
+                            <div class="step active">
+                                <div class="step-number">1</div>
+                                <div class="step-label">Setup</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">2</div>
+                                <div class="step-label">Capture</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">3</div>
+                                <div class="step-label">Submit</div>
+                            </div>
+                    </div>
                 </div>
                 
-                <form id="immutable-link-form" class="modal-form">
-                    <div class="form-group">
-                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                            <div class="flex items-center mb-2">
-                                <i class="fas fa-exclamation-triangle text-yellow-600 mr-2"></i>
-                                <h4 class="text-yellow-800 font-semibold">Important Instructions</h4>
+                    <!-- Main Content -->
+                    <div class="dns-content">
+                        <!-- Important Notice -->
+                        <div class="important-notice">
+                            <div class="notice-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
                             </div>
-                            <p class="text-yellow-700 text-sm">
-                                Make sure your DNS is properly configured before proceeding!
-                            </p>
+                            <div class="notice-content">
+                                <h5>Important</h5>
+                                <p>Make sure your DNS is properly configured before proceeding!</p>
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <h4 class="form-label">Step-by-Step Instructions</h4>
-                        <div class="space-y-3">
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">1</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Complete Tutorial & Get Gaming ID</p>
-                                    <p class="text-sm text-gray-600">Finish the game tutorial and copy your Gaming ID from profile</p>
+                        <!-- Instructions Section -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-list-ol"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Step-by-Step Instructions</h4>
+                                    <p>Follow these steps to capture your Immutable link</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">2</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Submit Gaming ID & Screenshot</p>
-                                    <p class="text-sm text-gray-600">Submit your Gaming ID and profile screenshot for verification</p>
+                            <div class="instructions-list">
+                                <div class="instruction-item">
+                                    <div class="instruction-number">1</div>
+                                    <div class="instruction-content">
+                                        <h5>Complete Tutorial & Get Gaming ID</h5>
+                                        <p>Finish the game tutorial and copy your Gaming ID from profile</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">3</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Configure DNS Settings</p>
-                                    <p class="text-sm text-gray-600">Set up DNS configuration to block auto-redirects</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">2</div>
+                                    <div class="instruction-content">
+                                        <h5>Submit Gaming ID & Screenshot</h5>
+                                        <p>Submit your Gaming ID and profile screenshot for verification</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">4</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Go Back to ${appName} App</p>
-                                    <p class="text-sm text-gray-600">Return to the ${appName} mobile game</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">3</div>
+                                    <div class="instruction-content">
+                                        <h5>Configure DNS Settings</h5>
+                                        <p>Set up DNS configuration to block auto-redirects</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">5</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Tap ${connectText}</p>
-                                    <p class="text-sm text-gray-600">Look for the "${connectText}" button in the app</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">4</div>
+                                    <div class="instruction-content">
+                                        <h5>Go Back to ${appName} App</h5>
+                                        <p>Return to the ${appName} mobile game</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">6</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">DNS Blocks Auto-Redirect</p>
-                                    <p class="text-sm text-gray-600">The link should appear in the app instead of auto-opening browser</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">5</div>
+                                    <div class="instruction-content">
+                                        <h5>Tap ${connectText}</h5>
+                                        <p>Look for the "${connectText}" button in the app</p>
                                 </div>
                             </div>
                             
-                            <div class="flex items-start space-x-3">
-                                <div class="flex-shrink-0 w-6 h-6 bg-green-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">7</div>
-                                <div>
-                                    <p class="font-medium text-gray-900">Copy the Immutable Link</p>
-                                    <p class="text-sm text-gray-600">Copy the Immutable link that appears in the app</p>
+                                <div class="instruction-item">
+                                    <div class="instruction-number">6</div>
+                                    <div class="instruction-content">
+                                        <h5>DNS Blocks Auto-Redirect</h5>
+                                        <p>The link should appear in the app instead of auto-opening browser</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">7</div>
+                                    <div class="instruction-content">
+                                        <h5>Copy the Immutable Link</h5>
+                                        <p>Copy the Immutable link that appears in the app</p>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">Paste Immutable Link *</label>
+                        <!-- Link Input Section -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-paste"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Immutable Link Submission</h4>
+                                    <p>Paste the captured link here</p>
+                                </div>
+                            </div>
+                            
+                            <div class="verification-box">
+                                <form id="immutable-link-form">
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Immutable Link:</div>
+                                        <div class="server-address">
                         <textarea id="immutable-link" required class="form-textarea" rows="3" 
-                            placeholder="Paste the Immutable link you copied from the ${appName} app here..."></textarea>
-                        <small class="form-hint">The link should start with https:// and contain ${linkPattern}-related parameters</small>
+                                                placeholder="Paste the Immutable link you copied from the ${appName} app here..." 
+                                                style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; font-family: 'Courier New', monospace; font-size: 0.875rem; resize: vertical;"></textarea>
+                                        </div>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-2">The link should start with https:// and contain ${linkPattern}-related parameters</p>
+                                </form>
+                            </div>
                     </div>
 
-                    <div class="form-group">
-                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div class="flex items-center mb-2">
-                                <i class="fas fa-info-circle text-blue-600 mr-2"></i>
-                                <h4 class="text-blue-800 font-semibold">Admin Review Process</h4>
+                        <!-- Admin Review Process -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-info-circle"></i>
                             </div>
-                            <p class="text-blue-700 text-sm">
-                                📋 <strong>After submission:</strong> Your link will be reviewed by an admin<br>
-                                ✅ <strong>Approved:</strong> You'll receive notification to proceed with game stages<br>
-                                ❌ <strong>Rejected:</strong> You'll be notified with reason and can resubmit<br>
-                                ⏳ <strong>Pending:</strong> Please wait for admin review (usually within 3-5 minutes)
-                            </p>
+                                <div class="section-title">
+                                    <h4>Admin Review Process</h4>
+                                    <p>What happens after submission</p>
                         </div>
                     </div>
                     
-                    <div class="form-group">
-                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                            <div class="flex items-center mb-2">
-                                <i class="fas fa-shield-alt text-yellow-600 mr-2"></i>
-                                <h4 class="text-yellow-800 font-semibold">Important Security Note</h4>
+                            <div class="instructions-list">
+                                <div class="instruction-item">
+                                    <div class="instruction-number">📋</div>
+                                    <div class="instruction-content">
+                                        <h5>After submission</h5>
+                                        <p>Your link will be reviewed by an admin</p>
                             </div>
-                            <p class="text-yellow-700 text-sm">
-                                🔒 <strong>Admin Access:</strong> The admin will use your link to sign in and verify your account<br>
-                                🎮 <strong>After Approval:</strong> You can proceed to play the game stages we've set up<br>
-                                📸 <strong>Final Submission:</strong> Submit your gameplay results for final review
-                            </p>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">✅</div>
+                                    <div class="instruction-content">
+                                        <h5>Approved</h5>
+                                        <p>You'll receive notification to proceed with game stages</p>
                         </div>
                     </div>
 
-                    <div class="modal-actions">
-                        <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">
+                                <div class="instruction-item">
+                                    <div class="instruction-number">❌</div>
+                                    <div class="instruction-content">
+                                        <h5>Rejected</h5>
+                                        <p>You'll be notified with reason and can resubmit</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">⏳</div>
+                                    <div class="instruction-content">
+                                        <h5>Pending</h5>
+                                        <p>Please wait for admin review (usually within 3-5 minutes)</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Security Notice -->
+                        <div class="important-notice">
+                            <div class="notice-icon">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <div class="notice-content">
+                                <h5>Security Note</h5>
+                                <p>🔒 Admin will use your link to sign in and verify your account. After approval, you can proceed to play the game stages we've set up.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="modal-footer-modern">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
                             Cancel
                         </button>
-                        <button type="submit" class="btn-primary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M9 12l2 2 4-4"></path>
-                                <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                                <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                            </svg>
+                    <button type="submit" class="btn btn-primary" form="immutable-link-form">
+                        <i class="fas fa-check"></i>
                             Submit Link
                         </button>
                     </div>
-                </form>
             </div>
         `;
 
         document.body.appendChild(modal);
 
         // Setup form submission
-        document.getElementById('immutable-link-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await this.submitImmutableLink(task.id);
-        });
+        const form = document.getElementById('immutable-link-form');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.submitImmutableLink(task.id);
+            });
+        }
     }
 
     async submitImmutableLink(taskId) {
@@ -2956,89 +3012,197 @@ class DashboardHandler {
 
         modal.innerHTML = `
             <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-            <div class="modal-container">
-                <div class="modal-header">
-                    <h3 class="modal-title">🎮 Game Setup Guide - ${task.title}</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
+            <div class="modal-container-modern max-w-2xl">
+                <!-- Modal Header -->
+                <div class="modal-header-modern">
+                    <div class="modal-title-section">
+                        <div class="modal-icon">
+                            <i class="fas fa-gamepad"></i>
+                            </div>
+                        <div class="modal-title-content">
+                            <h3 class="modal-title">Game Setup Guide</h3>
+                            <p class="modal-subtitle">${task.title}</p>
+                            </div>
+                        </div>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                        </button>
                 </div>
                 
-                <div class="modal-body">
-                    <div class="setup-steps">
-                        <div class="step-item active" id="step-1">
+                <!-- Modal Body -->
+                <div class="modal-body-modern">
+                    <!-- Progress Indicator -->
+                    <div class="dns-progress-indicator">
+                        <div class="progress-steps">
+                            <div class="step active" id="progress-step-1">
                             <div class="step-number">1</div>
-                            <div class="step-content">
-                                <h4 class="step-title">📱 Download Battle of Souls</h4>
-                                <p class="step-description">Download the game from Google Play Store</p>
-                                <div class="step-actions">
-                                    <button type="button" class="btn-primary" onclick="window.open('https://play.google.com/store/apps/details?id=com.pxlr.battleofsouls&hl=en', '_blank')">
-                                        <i class="fas fa-download"></i> Download Game
-                                    </button>
-                                    <button type="button" class="btn-secondary" onclick="window.dashboardHandler.nextStep(2)">
+                                <div class="step-label">Download</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step" id="progress-step-2">
+                                <div class="step-number">2</div>
+                                <div class="step-label">Sign In</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step" id="progress-step-3">
+                                <div class="step-number">3</div>
+                                <div class="step-label">Find ID</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step" id="progress-step-4">
+                                <div class="step-number">4</div>
+                                <div class="step-label">Submit</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Content -->
+                    <div class="dns-content">
+                        <!-- Step 1: Download -->
+                        <div class="dns-section" id="step-1">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-download"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Download Battle of Souls</h4>
+                                    <p>Download the game from Google Play Store</p>
+                                </div>
+                            </div>
+                            
+                            <div class="verification-box">
+                                <div class="dns-server-display">
+                                    <div class="server-label">Download Link:</div>
+                                    <div class="server-address">
+                                        <a href="https://play.google.com/store/apps/details?id=com.pxlr.battleofsouls&hl=en" target="_blank" class="verify-btn">
+                                            <i class="fas fa-download"></i>
+                                            Download Game
+                                        </a>
+                                    </div>
+                                </div>
+                                
+                                <div class="verification-actions">
+                                    <button type="button" class="btn btn-secondary" onclick="window.dashboardHandler.nextStep(2)">
+                                        <i class="fas fa-check"></i>
                                         I Already Have It
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="step-item" id="step-2">
-                            <div class="step-number">2</div>
-                            <div class="step-content">
-                                <h4 class="step-title">🔐 Sign In with Google Account</h4>
-                                <p class="step-description">Open the game and sign in with your Google account (NOT guest account)</p>
-                                <div class="step-warning">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <strong>Important:</strong> You must sign in with your Google account, not as a guest!
+                        <!-- Step 2: Sign In -->
+                        <div class="dns-section" id="step-2" style="display: none;">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-sign-in-alt"></i>
                                 </div>
-                                <div class="step-actions">
-                                    <button type="button" class="btn-primary" onclick="window.dashboardHandler.nextStep(3)">
+                                <div class="section-title">
+                                    <h4>Sign In with Google Account</h4>
+                                    <p>Open the game and sign in with your Google account</p>
+                                </div>
+                            </div>
+                            
+                            <div class="important-notice">
+                                <div class="notice-icon">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </div>
+                                <div class="notice-content">
+                                    <h5>Important</h5>
+                                    <p>You must sign in with your Google account, not as a guest!</p>
+                                </div>
+                            </div>
+                            
+                            <div class="verification-box">
+                                <div class="verification-actions">
+                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(3)">
+                                        <i class="fas fa-check"></i>
                                         I'm Signed In
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="step-item" id="step-3">
-                            <div class="step-number">3</div>
-                            <div class="step-content">
-                                <h4 class="step-title">🆔 Find Your Game ID</h4>
-                                <p class="step-description">In the game, go to Settings or Profile to find your Game ID</p>
-                                <div class="step-help">
-                                    <p><strong>How to find Game ID:</strong></p>
-                                    <ul>
-                                        <li>Open the game</li>
-                                        <li>Go to Settings or Profile</li>
-                                        <li>Look for "Player ID" or "Game ID"</li>
-                                        <li>Copy the ID (usually numbers)</li>
-                                    </ul>
+                        <!-- Step 3: Find Game ID -->
+                        <div class="dns-section" id="step-3" style="display: none;">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-id-card"></i>
                                 </div>
-                                <div class="step-actions">
-                                    <button type="button" class="btn-primary" onclick="window.dashboardHandler.nextStep(4)">
+                                <div class="section-title">
+                                    <h4>Find Your Game ID</h4>
+                                    <p>In the game, go to Settings or Profile to find your Game ID</p>
+                                </div>
+                            </div>
+                            
+                            <div class="instructions-list">
+                                <div class="instruction-item">
+                                    <div class="instruction-number">1</div>
+                                    <div class="instruction-content">
+                                        <h5>Open the game</h5>
+                                        <p>Launch Battle of Souls on your device</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">2</div>
+                                    <div class="instruction-content">
+                                        <h5>Go to Settings or Profile</h5>
+                                        <p>Navigate to the game's settings or profile section</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">3</div>
+                                    <div class="instruction-content">
+                                        <h5>Look for "Player ID" or "Game ID"</h5>
+                                        <p>Find your unique identifier in the profile</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="instruction-item">
+                                    <div class="instruction-number">4</div>
+                                    <div class="instruction-content">
+                                        <h5>Copy the ID</h5>
+                                        <p>Copy the ID (usually numbers) for submission</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="verification-box">
+                                <div class="verification-actions">
+                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(4)">
+                                        <i class="fas fa-check"></i>
                                         I Found My Game ID
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="step-item" id="step-4">
-                            <div class="step-number">4</div>
-                            <div class="step-content">
-                                <h4 class="step-title">📸 Submit Your Information</h4>
-                                <p class="step-description">Now you can submit your Game ID and profile screenshot</p>
+                        <!-- Step 4: Submit Information -->
+                        <div class="dns-section" id="step-4" style="display: none;">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-upload"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Submit Your Information</h4>
+                                    <p>Submit your Game ID and profile screenshot</p>
+                                </div>
+                            </div>
+                            
+                            <div class="verification-box">
                                 <form id="phase1-form" class="step-form">
-                                    <div class="form-group">
-                                        <label class="form-label">Game ID *</label>
-                                        <input type="text" id="game-id" required class="form-input" placeholder="Enter your Game ID">
-                                        <small class="form-hint">Your unique game identifier from the game settings</small>
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Game ID:</div>
+                                        <div class="server-address">
+                                            <input type="text" id="game-id" required class="form-input" placeholder="Enter your Game ID" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
+                                        </div>
                                     </div>
 
-                                    <div class="form-group">
-                                        <label class="form-label">Android Version *</label>
-                                        <select id="android-version" required class="form-select">
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Android Version:</div>
+                                        <div class="server-address">
+                                            <select id="android-version" required class="form-input" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
                                             <option value="">Select your Android version</option>
                                             <option value="10">Android 10</option>
                                             <option value="11">Android 11</option>
@@ -3047,33 +3211,38 @@ class DashboardHandler {
                                             <option value="14">Android 14</option>
                                             <option value="15">Android 15</option>
                                         </select>
-                                        <small class="form-hint">Select your device's Android version</small>
+                                        </div>
                                     </div>
 
-                                    <div class="form-group">
-                                        <label class="form-label">Profile Screenshot *</label>
-                                        <input type="file" id="profile-screenshot" required class="form-input" accept="image/*">
-                                        <small class="form-hint">Upload a screenshot of your game profile showing your Game ID</small>
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Profile Screenshot:</div>
+                                        <div class="server-address">
+                                            <input type="file" id="profile-screenshot" required class="form-input" accept="image/*" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
+                                        </div>
                                     </div>
 
-                                    <div class="form-group">
-                                        <label class="form-label">Additional Notes</label>
-                                        <textarea id="phase1-notes" class="form-textarea" rows="3" placeholder="Any additional information or notes"></textarea>
-                                    </div>
-
-                                    <div class="step-actions">
-                                        <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">
-                                            Cancel
-                                        </button>
-                                        <button type="submit" class="btn-primary">
-                                            <i class="fas fa-check"></i>
-                                            Submit Phase 1
-                                        </button>
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Additional Notes:</div>
+                                        <div class="server-address">
+                                            <textarea id="phase1-notes" class="form-textarea" rows="3" placeholder="Any additional information or notes" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; resize: vertical;"></textarea>
+                                        </div>
                                     </div>
                                 </form>
                             </div>
                         </div>
                     </div>
+                                    </div>
+
+                <!-- Modal Footer -->
+                <div class="modal-footer-modern">
+                                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                                            Cancel
+                                        </button>
+                    <button type="submit" class="btn btn-primary" form="phase1-form" id="submit-phase1-btn" style="display: none;">
+                        <i class="fas fa-check"></i>
+                                            Submit Phase 1
+                                        </button>
                 </div>
             </div>
         `;
@@ -3081,22 +3250,42 @@ class DashboardHandler {
         document.body.appendChild(modal);
 
         // Setup form submission
-        document.getElementById('phase1-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await this.submitPhase1Verification(task.id, modal);
-        });
+        const form = document.getElementById('phase1-form');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.submitPhase1Verification(task.id, modal);
+            });
+        }
     }
 
     nextStep(stepNumber) {
-        // Hide all steps
-        document.querySelectorAll('.step-item').forEach(step => {
+        // Hide all content steps
+        document.querySelectorAll('.dns-section').forEach(step => {
+            step.style.display = 'none';
+        });
+
+        // Update progress indicator
+        document.querySelectorAll('.progress-steps .step').forEach(step => {
             step.classList.remove('active');
         });
 
         // Show the target step
         const targetStep = document.getElementById(`step-${stepNumber}`);
+        const progressStep = document.getElementById(`progress-step-${stepNumber}`);
+
         if (targetStep) {
-            targetStep.classList.add('active');
+            targetStep.style.display = 'block';
+        }
+
+        if (progressStep) {
+            progressStep.classList.add('active');
+        }
+
+        // Show submit button only on last step
+        const submitBtn = document.getElementById('submit-phase1-btn');
+        if (submitBtn) {
+            submitBtn.style.display = stepNumber === 4 ? 'block' : 'none';
         }
     }
 
@@ -3233,72 +3422,156 @@ class DashboardHandler {
 
         modal.innerHTML = `
             <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-            <div class="modal-container">
-                <div class="modal-header">
-                    <h3 class="modal-title">Phase 2 Verification - ${task.title}</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
+            <div class="modal-container-modern max-w-2xl">
+                <!-- Modal Header -->
+                <div class="modal-header-modern">
+                    <div class="modal-title-section">
+                        <div class="modal-icon">
+                            <i class="fas fa-check-circle"></i>
+                            </div>
+                        <div class="modal-title-content">
+                            <h3 class="modal-title">Phase 2 Verification</h3>
+                            <p class="modal-subtitle">${task.title}</p>
+                            </div>
+                        </div>
+                        <button class="modal-close" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                        </button>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body-modern">
+                    <!-- Progress Indicator -->
+                    <div class="dns-progress-indicator">
+                        <div class="progress-steps">
+                            <div class="step active">
+                                <div class="step-number">1</div>
+                                <div class="step-label">Requirements</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">2</div>
+                                <div class="step-label">Submit</div>
+                            </div>
+                            <div class="step-line"></div>
+                            <div class="step">
+                                <div class="step-number">3</div>
+                                <div class="step-label">Complete</div>
+                            </div>
+                    </div>
                 </div>
                 
-                <form id="phase2-form" class="modal-form">
-                    <div class="form-group">
-                        <h4 class="form-label">Phase 2 Requirements</h4>
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <pre class="text-sm text-gray-700 whitespace-pre-wrap">${task.phase2Requirements || 'Please provide proof of task completion.'}</pre>
+                    <!-- Main Content -->
+                    <div class="dns-content">
+                        <!-- Requirements Section -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-list-check"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Phase 2 Requirements</h4>
+                                    <p>Complete these requirements to finish your task</p>
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">Game ID *</label>
-                        <input type="text" id="game-id-phase2" required class="form-input" placeholder="Enter your Game ID">
-                        <small class="form-hint">Same Game ID from Phase 1</small>
+                            <div class="verification-box">
+                                <div class="dns-server-display">
+                                    <div class="server-label">Requirements:</div>
+                                    <div class="server-address">
+                                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem; font-family: 'Courier New', monospace; font-size: 0.875rem; white-space: pre-wrap; color: #374151;">
+${task.phase2Requirements || 'Please provide proof of task completion.'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">Completion Screenshot *</label>
-                        <input type="file" id="completion-screenshot" required class="form-input" accept="image/*">
-                        <small class="form-hint">Upload screenshot showing task completion</small>
+                        <!-- Submission Form -->
+                        <div class="dns-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-upload"></i>
+                                </div>
+                                <div class="section-title">
+                                    <h4>Submit Your Completion</h4>
+                                    <p>Provide proof of task completion</p>
+                                </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="form-label">Additional Proof Screenshots</label>
-                        <input type="file" id="additional-screenshots" class="form-input" accept="image/*" multiple>
-                        <small class="form-hint">Optional: Additional screenshots for verification</small>
+                            <div class="verification-box">
+                                <form id="phase2-form" class="step-form">
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Game ID:</div>
+                                        <div class="server-address">
+                                            <input type="text" id="game-id-phase2" required class="form-input" placeholder="Enter your Game ID" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
                     </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Completion Notes</label>
-                        <textarea id="phase2-notes" class="form-textarea" rows="3" placeholder="Describe how you completed the task"></textarea>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-2">Same Game ID from Phase 1</p>
+                                    
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Completion Screenshot:</div>
+                                        <div class="server-address">
+                                            <input type="file" id="completion-screenshot" required class="form-input" accept="image/*" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
                     </div>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-2">Upload screenshot showing task completion</p>
+                                    
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Additional Screenshots:</div>
+                                        <div class="server-address">
+                                            <input type="file" id="additional-screenshots" class="form-input" accept="image/*" multiple style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
+                                        </div>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-2">Optional: Additional screenshots for verification</p>
+                                    
+                                    <div class="dns-server-display">
+                                        <div class="server-label">Completion Notes:</div>
+                                        <div class="server-address">
+                                            <textarea id="phase2-notes" class="form-textarea" rows="3" placeholder="Describe how you completed the task" style="width: 100%; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; resize: vertical;"></textarea>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
 
-                    <div class="modal-actions">
-                        <button type="button" class="btn-secondary" onclick="this.closest('.modal').remove()">
+                        <!-- Important Notice -->
+                        <div class="important-notice">
+                            <div class="notice-icon">
+                                <i class="fas fa-info-circle"></i>
+                            </div>
+                            <div class="notice-content">
+                                <h5>Final Submission</h5>
+                                <p>This is your final verification. Make sure all information is accurate and screenshots are clear.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="modal-footer-modern">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
                             Cancel
                         </button>
-                        <button type="submit" class="btn-primary">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M9 12l2 2 4-4"></path>
-                                <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                                <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                            </svg>
+                    <button type="submit" class="btn btn-primary" form="phase2-form">
+                        <i class="fas fa-check"></i>
                             Submit Phase 2
                         </button>
                     </div>
-                </form>
             </div>
         `;
 
         document.body.appendChild(modal);
 
         // Setup form submission
-        document.getElementById('phase2-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await this.submitPhase2Verification(task.id, modal);
-        });
+        const form = document.getElementById('phase2-form');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.submitPhase2Verification(task.id, modal);
+            });
+        }
     }
 
     async submitPhase1Verification(taskId, modal) {
