@@ -374,6 +374,11 @@ class RegisterHandler {
             if (checkboxContainer) {
                 checkboxContainer.classList.add('error');
             }
+            // Focus the checkbox container to make it visible
+            if (checkboxContainer) {
+                checkboxContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                checkboxContainer.focus();
+            }
             return false;
         }
 

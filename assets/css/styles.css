@@ -1249,7 +1249,11 @@ body {
 }
 
 .modern-checkbox-container input[type="checkbox"] {
-    display: none;
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
 }
 
 .modern-checkmark {
@@ -1261,6 +1265,18 @@ body {
     position: relative;
     flex-shrink: 0;
     transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.modern-checkbox-container:hover .modern-checkmark {
+    border-color: #667eea;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2);
+}
+
+.modern-checkbox-container input[type="checkbox"]:focus+.modern-checkmark {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+    outline: none;
 }
 
 .modern-checkbox-container input[type="checkbox"]:checked+.modern-checkmark {
@@ -1294,10 +1310,31 @@ body {
 .modern-checkbox-container.error .modern-checkmark {
     border-color: #ef4444;
     background-color: #fef2f2;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    animation: checkboxErrorPulse 0.5s ease-in-out;
 }
 
 .modern-checkbox-container.error {
     color: #ef4444;
+}
+
+.modern-checkbox-container.error .modern-checkbox-text {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+@keyframes checkboxErrorPulse {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
 
 .modern-terms-link:hover {
