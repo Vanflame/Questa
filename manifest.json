@@ -1,88 +1,23 @@
 {
-  "name": "Questa Earn",
+  "name": "Questa - Gaming Quest Platform",
   "short_name": "Questa",
-  "id": "com.questa.earn",
   "description": "Earn real money by completing gaming quests and tasks",
   "start_url": "/",
-  "scope": "/",
   "display": "standalone",
-  "display_override": [
-    "standalone",
-    "fullscreen",
-    "minimal-ui"
-  ],
-  "prefer_related_applications": false,
-  "orientation": "portrait",
   "background_color": "#ffffff",
-  "theme_color": "#2563eb",
-  "splash_screen": {
-    "background_color": "#ffffff",
-    "theme_color": "#2563eb"
-  },
-  "android": {
-    "package": "com.questa.earn",
-    "version_code": 1,
-    "min_sdk_version": 21,
-    "target_sdk_version": 33,
-    "compile_sdk_version": 33,
-    "build_tools_version": "33.0.0"
-  },
-  "lang": "en",
-  "dir": "ltr",
+  "theme_color": "#3B82F6",
   "icons": [
-    {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
     {
       "src": "/assets/images/logo.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
-      "src": "/favicon.svg",
+      "src": "/favicon.png",
       "sizes": "any",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
-    }
-  ],
-  "categories": [
-    "productivity",
-    "finance"
-  ],
-  "shortcuts": [
-    {
-      "name": "Login",
-      "short_name": "Login",
-      "url": "/login",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "My Tasks",
-      "short_name": "Tasks",
-      "url": "/dashboard",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
     }
   ]
 }

@@ -1391,42 +1391,51 @@ Example:
                     <div class="form-group">
                         <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                             <div class="flex items-center mb-2">
-                                <i class="fas fa-network-wired text-blue-600 mr-2"></i>
-                                <h4 class="text-blue-800 font-semibold">DNS Setup Configuration</h4>
+                                <i class="fas fa-shield-alt text-blue-600 mr-2"></i>
+                                <h4 class="text-blue-800 font-semibold">Firefox + LeechBlock Configuration</h4>
                             </div>
                             <p class="text-blue-700 text-sm">
-                                Configure DNS setup requirements for Immutable link capture
+                                Configure Firefox browser with LeechBlock extension for Immutable link capture
                             </p>
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Require DNS Setup</label>
+                        <label class="form-label">Require Firefox + LeechBlock Setup</label>
                         <div class="flex items-center space-x-4">
                             <label class="flex items-center">
                                 <input type="radio" name="require-dns-setup" value="true" checked class="mr-2">
-                                <span>Yes - Users must configure DNS before capturing Immutable link</span>
+                                <span>Yes - Users must install Firefox + LeechBlock before capturing Immutable link</span>
                             </label>
                             <label class="flex items-center">
                                 <input type="radio" name="require-dns-setup" value="false" class="mr-2">
-                                <span>No - Skip DNS setup step</span>
+                                <span>No - Skip Firefox + LeechBlock setup step</span>
                             </label>
                         </div>
-                        <small class="form-hint">DNS setup prevents auto-redirect and allows users to capture Immutable links</small>
+                        <small class="form-hint">Firefox + LeechBlock setup prevents auto-redirect and allows users to capture Immutable links</small>
                     </div>
 
                     <div class="form-group" id="dns-config-section">
-                        <label class="form-label">DNS Server Address</label>
+                        <label class="form-label">Immutable Login URL to Block</label>
                         <input type="text" id="dns-server-address" class="form-input" 
-                            placeholder="36413b.dns.nextdns.io" value="36413b.dns.nextdns.io">
-                        <small class="form-hint">The DNS server address users need to configure (default: NextDNS)</small>
+                            placeholder="https://auth.immutable.com" value="https://auth.immutable.com">
+                        <small class="form-hint">The Immutable login URL that users need to block using LeechBlock extension</small>
                     </div>
 
                     <div class="form-group" id="dns-instructions-section">
-                        <label class="form-label">DNS Setup Instructions</label>
-                        <textarea id="dns-setup-instructions" class="form-textarea" rows="4" 
-                            placeholder="Enter custom DNS setup instructions (optional). Leave empty to use default instructions."></textarea>
-                        <small class="form-hint">Custom instructions will override the default step-by-step DNS setup guide</small>
+                        <label class="form-label">Firefox + LeechBlock Setup Instructions</label>
+                        <textarea id="dns-setup-instructions" class="form-textarea" rows="6" 
+                            placeholder="Enter custom Firefox + LeechBlock setup instructions (optional). Leave empty to use default instructions.
+
+Default instructions include:
+1. Install Firefox browser
+2. Install LeechBlock NG extension
+3. Access LeechBlock options through Extensions menu
+4. Configure Block Set 1 with domain: auth.immutable.com
+5. Set time periods to 'All Day' for all days
+6. Set block method to 'Default Page'
+7. Save settings and test the blocking"></textarea>
+                        <small class="form-hint">Custom instructions will override the default step-by-step Firefox + LeechBlock setup guide</small>
                     </div>
 
                     <div class="form-group" id="immutable-app-section">
@@ -1553,10 +1562,10 @@ Example:
         const immutableAppSection = document.getElementById('immutable-app-section');
 
         function toggleDNSConfig() {
-            const requireDNS = document.querySelector('input[name="require-dns-setup"]:checked').value === 'true';
-            dnsConfigSection.style.display = requireDNS ? 'block' : 'none';
-            dnsInstructionsSection.style.display = requireDNS ? 'block' : 'none';
-            immutableAppSection.style.display = requireDNS ? 'block' : 'none';
+            const requireFirefoxSetup = document.querySelector('input[name="require-dns-setup"]:checked').value === 'true';
+            dnsConfigSection.style.display = requireFirefoxSetup ? 'block' : 'none';
+            dnsInstructionsSection.style.display = requireFirefoxSetup ? 'block' : 'none';
+            immutableAppSection.style.display = requireFirefoxSetup ? 'block' : 'none';
         }
 
         dnsRadioButtons.forEach(radio => {
@@ -1605,10 +1614,10 @@ Example:
                 calculatedMinutes: userTimeLimit
             });
 
-            // DNS Setup Configuration
-            const requireDNSSetup = document.querySelector('input[name="require-dns-setup"]:checked').value === 'true';
-            const dnsServerAddress = document.getElementById('dns-server-address').value.trim();
-            const dnsSetupInstructions = document.getElementById('dns-setup-instructions').value.trim();
+            // Firefox + LeechBlock Setup Configuration
+            const requireFirefoxSetup = document.querySelector('input[name="require-dns-setup"]:checked').value === 'true';
+            const immutableUrlToBlock = document.getElementById('dns-server-address').value.trim();
+            const firefoxSetupInstructions = document.getElementById('dns-setup-instructions').value.trim();
             const immutableAppName = document.getElementById('immutable-app-name').value.trim();
             const immutableConnectText = document.getElementById('immutable-connect-text').value.trim();
             const immutableLinkPattern = document.getElementById('immutable-link-pattern').value.trim();
@@ -1646,11 +1655,11 @@ Example:
                 androidVersion,
                 status,
                 deadline: firebase.firestore.Timestamp.fromDate(deadline),
-                // DNS Setup Configuration
-                requireDNSSetup,
-                dnsConfig: requireDNSSetup ? {
-                    serverAddress: dnsServerAddress || '36413b.dns.nextdns.io',
-                    customInstructions: dnsSetupInstructions || null,
+                // Firefox + LeechBlock Setup Configuration
+                requireDNSSetup: requireFirefoxSetup,
+                dnsConfig: requireFirefoxSetup ? {
+                    serverAddress: immutableUrlToBlock || 'https://auth.immutable.com',
+                    customInstructions: firefoxSetupInstructions || null,
                     immutableApp: {
                         name: immutableAppName || 'Battle of Souls',
                         connectText: immutableConnectText || 'Connect to Immutable',
@@ -1993,7 +2002,7 @@ Example:
 
             // Update task status based on verification phase
             if (verification.phase === 'initial') {
-                // Phase 1 approved - user can now proceed to DNS setup
+                // Phase 1 approved - user can now proceed to Firefox + LeechBlock setup
                 console.log('🔍 Approving initial verification, updating task status to unlocked...');
                 console.log('🔍 User ID:', verification.userId, 'Task ID:', verification.taskId);
                 await window.firestoreManager.updateTaskStatus(verification.taskId, 'unlocked', verification.userId);
@@ -2006,7 +2015,7 @@ Example:
                 await window.firestoreManager.createAdminNotification(verification.userId, {
                     type: 'verification_approved',
                     title: '✅ Initial Verification Approved',
-                    message: `Your initial verification for "${taskTitle}" has been approved! You can now proceed to DNS setup.`,
+                    message: `Your initial verification for "${taskTitle}" has been approved! You can now proceed to Firefox + LeechBlock setup.`,
                     data: { taskId: verification.taskId, taskTitle: taskTitle, phase: 'initial' }
                 });
             } else if (verification.phase === 'final') {

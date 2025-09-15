@@ -4,48 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Questa Earn - Redirecting...</title>
-    <meta name="theme-color" content="#2563eb">
-    <meta name="description" content="Earn real money by completing gaming quests and tasks">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Questa">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Questa">
-    <meta name="msapplication-TileColor" content="#2563eb">
-    <meta name="msapplication-tap-highlight" content="no">
+    <title>TaskEarn - Redirecting...</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="icon" type="image/png" href="/assets/images/logo.png">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="manifest" href="/manifest.json">
     <link href="/assets/css/styles.css" rel="stylesheet">
-    <style>
-        /* Ensure standalone mode styling */
-        @media (display-mode: standalone) {
-            body {
-                -webkit-user-select: none;
-                -webkit-touch-callout: none;
-                -webkit-tap-highlight-color: transparent;
-            }
-        }
-
-        /* Hide browser UI elements in standalone mode */
-        @media (display-mode: standalone) {
-            .browser-ui {
-                display: none !important;
-            }
-        }
-
-        /* Ensure full screen in standalone mode */
-        html,
-        body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow-x: hidden;
-        }
-    </style>
 </head>
 
 <body class="bg-gray-50">
@@ -60,66 +24,6 @@
     <script>
         // Redirect to login page
         window.location.href = '/login/';
-    </script>
-
-    <script>
-        // Service Worker Registration
-        if ("serviceWorker" in navigator) {
-            window.addEventListener("load", () => {
-                navigator.serviceWorker.register("/service-worker.js")
-                    .then((registration) => {
-                        console.log("Service Worker registered successfully:", registration.scope);
-
-                        // Force update to ensure latest version
-                        registration.update();
-
-                        // Check for updates
-                        registration.addEventListener('updatefound', () => {
-                            const newWorker = registration.installing;
-                            newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    // New content is available, notify user
-                                    if (confirm('New version available! Reload to update?')) {
-                                        window.location.reload();
-                                    }
-                                }
-                            });
-                        });
-                    })
-                    .catch((error) => {
-                        console.log("Service Worker registration failed:", error);
-                    });
-            });
-        }
-
-        // PWA Install Prompt
-        let deferredPrompt;
-        window.addEventListener('beforeinstallprompt', (e) => {
-            // Prevent the mini-infobar from appearing on mobile
-            e.preventDefault();
-            // Stash the event so it can be triggered later
-            deferredPrompt = e;
-            // Show install button or notification
-            console.log('PWA install prompt available');
-        });
-
-        // Handle PWA install
-        window.addEventListener('appinstalled', (evt) => {
-            console.log('PWA was installed');
-        });
-
-        // Debug standalone mode
-        if (window.matchMedia('(display-mode: standalone)').matches) {
-            console.log('Running in standalone mode');
-            document.body.classList.add('standalone-mode');
-        } else {
-            console.log('Running in browser mode');
-        }
-
-        // Check if launched from home screen
-        if (window.navigator.standalone === true) {
-            console.log('Launched from home screen (iOS)');
-        }
     </script>
 </body>
 

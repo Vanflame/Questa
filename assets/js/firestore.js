@@ -365,7 +365,7 @@ class FirestoreManager {
             const docId = `${userId}_${taskId}`;
             console.log('🔍 Getting task status for user:', { userId, taskId, docId });
 
-            // First check for custom task status (DNS setup, Immutable link, etc.)
+            // First check for custom task status (Firefox + LeechBlock setup, Immutable link, etc.)
             const taskStatusDoc = await db.collection(this.collections.taskStatuses)
                 .doc(docId)
                 .get();

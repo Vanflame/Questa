@@ -2390,10 +2390,11 @@ body {
 }
 
 .modal-subtitle {
-    font-size: 0.8125rem;
-    color: #6b7280;
+    font-size: 0.875rem;
+    color: #4b5563;
     margin: 0;
     line-height: 1.4;
+    font-weight: 500;
 }
 
 .modal-close {
@@ -2727,9 +2728,9 @@ body {
 }
 
 .step-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: #64748b;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #475569;
     text-align: center;
 }
 
@@ -2879,10 +2880,10 @@ body {
 }
 
 .server-label {
-    font-size: 0.75rem;
-    color: #64748b;
+    font-size: 0.8125rem;
+    color: #374151;
     margin-bottom: 0.5rem;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .server-address {
@@ -2934,12 +2935,13 @@ body {
     padding: 0.75rem 1.5rem;
     border-radius: 0.5rem;
     font-size: 0.875rem;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     transition: all 0.2s ease;
+    text-decoration: none;
 }
 
 .verify-btn:hover {
@@ -3010,7 +3012,8 @@ body {
     }
 
     .step-label {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
+        font-weight: 600;
     }
 
     .step-line {
@@ -3346,18 +3349,52 @@ body {
     }
 
     .modal-container-modern {
-        margin: 1rem;
-        max-width: calc(100% - 2rem);
+        margin: 0.5rem;
+        max-width: calc(100% - 1rem);
+        width: calc(100% - 1rem);
+        max-height: calc(100vh - 1rem);
+    }
+
+    .modal-body-modern {
+        padding: 1rem;
+        max-height: calc(100vh - 8rem);
+        overflow-y: auto;
     }
 
     .modal-footer-modern {
         flex-direction: column;
+        gap: 0.75rem;
+        padding: 1rem;
     }
 
     .btn-primary-modern,
     .btn-secondary-modern {
         width: 100%;
         justify-content: center;
+    }
+
+    .dns-progress-indicator {
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .progress-steps {
+        gap: 0.5rem;
+    }
+
+    .section-header {
+        padding: 1rem;
+        flex-direction: column;
+        text-align: center;
+        gap: 0.75rem;
+    }
+
+    .instructions-list {
+        padding: 1rem;
+    }
+
+    .verification-box {
+        padding: 1rem;
     }
 }
 
