@@ -146,6 +146,7 @@
                         <div class="profile-details">
                             <h1 id="profile-name" class="profile-name">Loading...</h1>
                             <p id="user-email" class="profile-email">Loading...</p>
+                            <p id="user-short-id" class="user-short-id">ID: Loading...</p>
                             <div class="profile-status">
                                 <span id="user-status" class="status-badge status-active">
                                     <i class="fas fa-check-circle"></i>
@@ -211,14 +212,14 @@
                             <p class="section-subtitle">Complete tasks to earn rewards and grow your balance</p>
                         </div>
                         <div class="header-actions">
-                            <button class="refresh-btn" onclick="window.dashboardHandler.loadTasks()">
+                            <button class="refresh-btn" onclick="window.dashboardHandler.loadTasks(true)">
                                 <i class="fas fa-sync-alt"></i>
                                 Refresh
                             </button>
                         </div>
                     </div>
 
-                    <div class="tasks-grid" id="tasks-grid">
+                    <div class="tasks-grid modern-tasks-grid" id="tasks-grid">
                         <!-- Task cards will be populated by JavaScript -->
                     </div>
                 </div>
@@ -409,17 +410,8 @@
         </div>
     </div>
 
-    <!-- Loading Spinner -->
-    <div id="loading-spinner" class="loading-spinner-modern hidden">
-        <div class="loading-content">
-            <div class="loading-spinner-icon">
-                <div class="spinner"></div>
-            </div>
-            <div class="loading-text">
-                <span>Loading...</span>
-            </div>
-        </div>
-    </div>
+    <!-- Loading Spinner - Now handled by LoadingManager -->
+    <!-- Removed duplicate loading spinner to prevent double loading -->
 
     <!-- Firebase Scripts -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -430,12 +422,12 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 
     <!-- App Scripts -->
+    <script src="/assets/js/config.js"></script>
     <script src="/assets/js/firebase-config.js"></script>
-    <script src="/assets/js/supabase-config.js"></script>
-    <script src="/assets/js/supabase-storage.js"></script>
     <script src="/assets/js/auth.js"></script>
     <script src="/assets/js/firestore.js"></script>
     <script src="/assets/js/storage.js"></script>
+    <script src="/assets/js/loading-manager.js"></script>
     <script src="/assets/js/app.js"></script>
     <script src="/assets/js/dashboard-handler.js"></script>
 </body>

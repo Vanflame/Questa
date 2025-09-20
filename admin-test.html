@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Test Panel</title>
+    <link href="/assets/css/styles.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .admin-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .admin-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .admin-title {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .admin-subtitle {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .overview-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .overview-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid #f3f4f6;
+            background: #f9fafb;
+        }
+
+        .card-title {
+            margin: 0;
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-content {
+            padding: 1.5rem;
+        }
+
+        .activity-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1rem;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background-color 0.2s ease;
+        }
+
+        .activity-item:hover {
+            background-color: #f9fafb;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .activity-title {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 0.25rem;
+        }
+
+        .activity-details {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .activity-user {
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .activity-task,
+        .activity-amount {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+
+        .activity-meta {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .activity-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .activity-status.status-pending {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .activity-status.status-pending_review {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+
+        .activity-status.status-approved {
+            background: #d1fae5;
+            color: #059669;
+        }
+
+        .activity-status.status-rejected {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .activity-date {
+            color: #6b7280;
+            font-size: 0.75rem;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .quick-action-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            color: #374151;
+        }
+
+        .quick-action-btn:hover {
+            background: #e2e8f0;
+            transform: translateY(-1px);
+        }
+
+        .quick-action-btn i {
+            font-size: 1.5rem;
+            color: #3b82f6;
+        }
+
+        .quick-action-btn span {
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+
+        .test-button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1 class="admin-title">Admin Test Panel</h1>
+            <p class="admin-subtitle">Testing admin functionality</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="total-users">9</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="total-tasks">3</div>
+                <div class="stat-label">Active Tasks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="pending-verifications">0</div>
+                <div class="stat-label">Pending Verifications</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="pending-withdrawals">0</div>
+                <div class="stat-label">Pending Withdrawals</div>
+            </div>
+        </div>
+
+        <div class="overview-grid">
+            <div class="overview-card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-history"></i>
+                        Recent Activity
+                    </h3>
+                </div>
+                <div class="card-content">
+                    <div id="recent-activity-list" class="activity-list">
+                        <p>Loading recent activity...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overview-card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-bolt"></i>
+                        Quick Actions
+                    </h3>
+                </div>
+                <div class="card-content">
+                    <div class="quick-actions">
+                        <button class="quick-action-btn" onclick="testLoadData()">
+                            <i class="fas fa-plus"></i>
+                            <span>Add Task</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="testLoadActivity()">
+                            <i class="fas fa-check"></i>
+                            <span>Review Verifications</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="testLoadActivity()">
+                            <i class="fas fa-money-bill"></i>
+                            <span>Process Withdrawals</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="testLoadActivity()">
+                            <i class="fas fa-user-cog"></i>
+                            <span>Manage Users</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <button class="test-button" onclick="testLoadData()">Test Load Data</button>
+            <button class="test-button" onclick="testLoadActivity()">Test Load Activity</button>
+        </div>
+    </div>
+
+    <script>
+        function testLoadData() {
+            console.log('Testing data load...');
+            document.getElementById('recent-activity-list').innerHTML = `
+                <div style="padding: 20px; text-align: center;">
+                    <h4>Test Data Loaded</h4>
+                    <p>This is a test of the admin panel functionality.</p>
+                </div>
+            `;
+        }
+
+        function testLoadActivity() {
+            console.log('Testing activity load...');
+            const activities = [
+                { type: 'submission', user: 'test@example.com', task: 'Task 1', status: 'pending_review', date: new Date() },
+                { type: 'withdrawal', user: 'user@example.com', amount: 100, status: 'pending', date: new Date() },
+                { type: 'submission', user: 'admin@example.com', task: 'Task 2', status: 'approved', date: new Date() }
+            ];
+
+            const container = document.getElementById('recent-activity-list');
+            container.innerHTML = activities.map(activity => `
+                <div class="activity-item">
+                    <div class="activity-icon">
+                        <i class="fas ${activity.type === 'submission' ? 'fa-tasks' : 'fa-money-bill-wave'}"></i>
+                    </div>
+                    <div class="activity-content">
+                        <div class="activity-title">
+                            ${activity.type === 'submission' ? 'Task Submission' : 'Withdrawal Request'}
+                        </div>
+                        <div class="activity-details">
+                            <span class="activity-user">${activity.user}</span>
+                            ${activity.type === 'submission' ?
+                    `<span class="activity-task">• ${activity.task}</span>` :
+                    `<span class="activity-amount">• ₱${activity.amount}</span>`
+                }
+                        </div>
+                        <div class="activity-meta">
+                            <span class="activity-status status-${activity.status}">${activity.status.replace('_', ' ').toUpperCase()}</span>
+                            <span class="activity-date">${activity.date.toLocaleString()}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Auto-load test data on page load
+        window.addEventListener('load', () => {
+            console.log('Page loaded, testing admin functionality...');
+            setTimeout(() => {
+                testLoadActivity();
+            }, 1000);
+        });
+    </script>
+</body>
+
+</html>

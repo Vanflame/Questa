@@ -6,24 +6,28 @@ class FirestoreManager {
             tasks: 'tasks',
             verifications: 'verifications',
             withdrawals: 'withdrawals',
-            taskStatuses: 'taskStatuses'
+            taskStatuses: 'taskStatuses',
+            taskSubmissions: 'task_submissions',
+            balances: 'balances',
+            notifications: 'notifications'
         };
     }
 
     // User Management
     async createUser(userData) {
-        try {
+        return await window.loadingManager.withDatabaseLoading(async () => {
+            // Generate short user ID
+            const shortUserId = this.generateShortUserId(userData.uid);
+
             await db.collection(this.collections.users).doc(userData.uid).set({
                 email: userData.email,
+                user_short_id: shortUserId,
                 walletBalance: 0,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 isAdmin: false
             });
             return true;
-        } catch (error) {
-            console.error('Error creating user:', error);
-            throw error;
-        }
+        }, 'Creating Account', 'Please wait while we create your account...');
     }
 
     async updateUser(uid, data) {
@@ -46,24 +50,66 @@ class FirestoreManager {
         }
     }
 
-    async updateWalletBalance(uid, amount) {
+    async updateWalletBalance(uid, amount, reason = 'balance_update', metadata = {}) {
         try {
             const userRef = db.collection(this.collections.users).doc(uid);
+            let beforeBalance = 0;
+            let afterBalance = 0;
+
             await db.runTransaction(async (transaction) => {
                 const userDoc = await transaction.get(userRef);
                 if (!userDoc.exists) {
                     throw new Error('User does not exist');
                 }
 
-                const currentBalance = userDoc.data().walletBalance || 0;
-                const newBalance = currentBalance + amount;
+                beforeBalance = userDoc.data().walletBalance || 0;
+                afterBalance = beforeBalance + amount;
 
-                transaction.update(userRef, { walletBalance: newBalance });
+                transaction.update(userRef, { walletBalance: afterBalance });
             });
-            return true;
+
+            // Record the balance change in transaction history
+            await this.recordBalanceChange(uid, {
+                beforeBalance,
+                afterBalance,
+                changeAmount: amount,
+                reason,
+                metadata,
+                timestamp: new Date()
+            });
+
+            return { beforeBalance, afterBalance };
         } catch (error) {
             console.error('Error updating wallet balance:', error);
             throw error;
+        }
+    }
+
+    async recordBalanceChange(uid, changeData) {
+        try {
+            console.log('📝 Recording balance change:', {
+                userId: uid,
+                reason: changeData.reason,
+                changeAmount: changeData.changeAmount,
+                beforeBalance: changeData.beforeBalance,
+                afterBalance: changeData.afterBalance
+            });
+
+            await db.collection('balance_changes').add({
+                userId: uid,
+                beforeBalance: changeData.beforeBalance,
+                afterBalance: changeData.afterBalance,
+                changeAmount: changeData.changeAmount,
+                reason: changeData.reason,
+                metadata: changeData.metadata,
+                timestamp: changeData.timestamp,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            console.log('✅ Balance change recorded successfully');
+        } catch (error) {
+            console.error('❌ Error recording balance change:', error);
+            // Don't throw error here as it's not critical
         }
     }
 
@@ -149,8 +195,10 @@ class FirestoreManager {
         try {
             const docRef = await db.collection(this.collections.tasks).add({
                 ...taskData,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'active'
+                created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(), // Keep both for compatibility
+                updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+                status: taskData.status || 'active'
             });
             return docRef.id;
         } catch (error) {
@@ -180,10 +228,23 @@ class FirestoreManager {
     }
 
     async getTasks() {
-        try {
+        return await window.loadingManager.withDatabaseLoading(async () => {
             const snapshot = await db.collection(this.collections.tasks)
                 .where('status', '==', 'active')
-                .orderBy('createdAt', 'desc')
+                .orderBy('created_at', 'desc')
+                .get();
+
+            return snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+        }, 'Loading Tasks', 'Please wait while we load available tasks...');
+    }
+
+    async getAllTasks() {
+        try {
+            const snapshot = await db.collection(this.collections.tasks)
+                .orderBy('created_at', 'desc')
                 .get();
 
             return snapshot.docs.map(doc => ({
@@ -191,7 +252,7 @@ class FirestoreManager {
                 ...doc.data()
             }));
         } catch (error) {
-            console.error('Error getting tasks:', error);
+            console.error('Error getting all tasks:', error);
             throw error;
         }
     }
@@ -362,142 +423,35 @@ class FirestoreManager {
     // Utility Methods
     async getTaskStatusForUser(userId, taskId) {
         try {
-            const docId = `${userId}_${taskId}`;
-            console.log('🔍 Getting task status for user:', { userId, taskId, docId });
+            // Get task submission for this user and task
+            const submissions = await this.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === userId
+            );
 
-            // First check for custom task status (Firefox + LeechBlock setup, Immutable link, etc.)
-            const taskStatusDoc = await db.collection(this.collections.taskStatuses)
-                .doc(docId)
-                .get();
-
-            console.log('📄 Document exists:', taskStatusDoc.exists);
-            console.log('📄 Document ID:', taskStatusDoc.id);
-
-            if (taskStatusDoc.exists) {
-                const taskStatus = taskStatusDoc.data();
-                console.log('🔍 Found task status document:', {
-                    userId: userId,
-                    taskId: taskId,
-                    docId: docId,
-                    status: taskStatus.status,
-                    phase: taskStatus.phase,
-                    immutableLinkApproved: taskStatus.immutableLinkApproved,
-                    immutableLink: taskStatus.immutableLink ? 'Present' : 'Missing',
-                    rawData: taskStatus
-                });
-
-                const result = {
-                    status: taskStatus.status,
-                    phase: taskStatus.phase || null,
-                    verificationId: taskStatus.verificationId || null,
-                    immutableLinkApproved: taskStatus.immutableLinkApproved || false,
-                    immutableLink: taskStatus.immutableLink || null,
-                    approvedAt: taskStatus.approvedAt || null,
-                    approvedBy: taskStatus.approvedBy || null,
-                    rejectedAt: taskStatus.rejectedAt || null,
-                    rejectedBy: taskStatus.rejectedBy || null
+            if (userSubmission) {
+                return {
+                    status: userSubmission.status,
+                    restart_count: userSubmission.restart_count || 0,
+                    created_at: userSubmission.created_at,
+                    updated_at: userSubmission.updated_at
                 };
-
-                console.log('📤 Returning task status:', result);
-                return result;
-            } else {
-                console.log('❌ No task status document found for:', docId);
-                // For new users with no task status document, return available status
-                // Don't fall back to verification logic to avoid status changes
-                return { status: 'available', phase: null };
             }
+
+            // No submission found, task is available
+            return { status: 'available', restart_count: 0 };
         } catch (error) {
             console.error('Error getting task status for user:', error);
-            return { status: 'available', phase: null };
+            return { status: 'available', restart_count: 0 };
         }
     }
 
     async updateTaskStatus(taskId, status, userId = null) {
-        try {
-            // Use provided userId or fallback to current user
-            const targetUserId = userId || auth.currentUser.uid;
-
-            // Check if this is the first time the user is starting the task
-            const existingStatus = await db.collection(this.collections.taskStatuses).doc(`${targetUserId}_${taskId}`).get();
-            const isStartingTask = !existingStatus.exists && (status === 'pending' || status === 'dns_setup');
-            const isCompletingTask = status === 'complete' || status === 'completed';
-
-            const statusData = {
-                userId: targetUserId,
-                taskId,
-                status,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            // Set startedAt timestamp when user starts the task
-            if (isStartingTask) {
-                statusData.startedAt = firebase.firestore.FieldValue.serverTimestamp();
-                console.log(`🚀 Task started at: ${new Date().toISOString()} for user: ${targetUserId}, task: ${taskId}`);
-            }
-
-            // Clear startedAt when task is completed (for restart functionality)
-            if (isCompletingTask) {
-                statusData.startedAt = null;
-                console.log(`✅ Task completed, cleared start time for user: ${targetUserId}, task: ${taskId}`);
-            }
-
-            console.log('🔍 Updating task status:', {
-                userId: targetUserId,
-                taskId: taskId,
-                status: status,
-                statusData: statusData
-            });
-            await db.collection(this.collections.taskStatuses).doc(`${targetUserId}_${taskId}`).set(statusData, { merge: true });
-            console.log('✅ Task status document updated successfully');
-
-            console.log(`Task status updated: ${taskId} -> ${status} for user: ${targetUserId}`);
-        } catch (error) {
-            console.error('Error updating task status:', error);
-            throw error;
-        }
+        // This method is deprecated - use task submissions instead
+        console.warn('updateTaskStatus is deprecated. Use task submissions instead.');
+        return true;
     }
 
-    async storeImmutableLink(taskId, immutableLink) {
-        try {
-            const userId = auth.currentUser.uid;
-            const docId = `${userId}_${taskId}`;
-
-            console.log('🔍 Storing immutable link:', {
-                userId: userId,
-                taskId: taskId,
-                docId: docId,
-                immutableLink: immutableLink
-            });
-
-            const dataToStore = {
-                userId,
-                taskId,
-                immutableLink,
-                status: 'pending_immutable_review', // Set to pending until admin approval
-                phase: 'immutable_link', // Keep the phase
-                immutableLinkApproved: false, // Explicitly set to false for admin review
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            console.log('📝 Data to store:', dataToStore);
-
-            // Use set without merge to ensure status is overridden
-            await db.collection(this.collections.taskStatuses).doc(docId).update(dataToStore);
-
-            console.log(`✅ Immutable link stored for task: ${taskId} - awaiting admin review`);
-
-            // Verify the data was stored correctly
-            const verifyDoc = await db.collection(this.collections.taskStatuses).doc(docId).get();
-            if (verifyDoc.exists) {
-                console.log('✅ Verification - Document exists:', verifyDoc.data());
-            } else {
-                console.log('❌ Verification - Document does not exist!');
-            }
-        } catch (error) {
-            console.error('Error storing Immutable link:', error);
-            throw error;
-        }
-    }
 
     // Real-time listeners
     listenToTasks(callback) {
@@ -528,132 +482,552 @@ class FirestoreManager {
             .onSnapshot(callback);
     }
 
-    async getAllImmutableLinks() {
+    listenToUserNotifications(userId, callback) {
+        return db.collection(this.collections.notifications)
+            .where('user_id', '==', userId)
+            .orderBy('created_at', 'desc')
+            .onSnapshot(callback);
+    }
+
+
+
+    // Enhanced Task Management
+
+    async updateTask(taskId, taskData) {
         try {
-            // Get all task statuses and filter for those with immutable links
-            const snapshot = await db.collection(this.collections.taskStatuses)
-                .orderBy('updatedAt', 'desc')
-                .get();
-
-            const links = [];
-            for (const doc of snapshot.docs) {
-                const data = doc.data();
-
-                // Filter for documents that have immutable links
-                if (data.immutableLink) {
-                    // Get task and user details
-                    const task = await this.getTask(data.taskId);
-                    const user = await this.getUser(data.userId);
-
-                    if (task && user) {
-                        links.push({
-                            id: doc.id,
-                            ...data,
-                            task: task,
-                            user: user
-                        });
-                    }
-                }
-            }
-
-            return links;
+            await db.collection(this.collections.tasks).doc(taskId).update({
+                ...taskData,
+                updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return true;
         } catch (error) {
-            console.error('Error getting all immutable links:', error);
+            console.error('Error updating task:', error);
             throw error;
         }
     }
 
-    async getUserCompletionStats(userId) {
+    async deleteTask(taskId) {
         try {
-            // Get all quest completions for the user from questCompletions collection
-            const snapshot = await db.collection('questCompletions')
-                .where('userId', '==', userId)
-                .get();
+            await db.collection(this.collections.tasks).doc(taskId).delete();
+            return true;
+        } catch (error) {
+            console.error('Error deleting task:', error);
+            throw error;
+        }
+    }
 
-            const completions = snapshot.docs.map(doc => doc.data());
+    // Task Submissions Management
+    async createTaskSubmission(submissionData) {
+        return await window.loadingManager.withDatabaseLoading(async () => {
+            // Get user info for email and short ID
+            const userDoc = await db.collection('users').doc(submissionData.user_id).get();
+            const userData = userDoc.exists ? userDoc.data() : {};
 
-            // Calculate total completions
-            const totalCompletions = completions.length;
+            // Generate short user ID
+            const shortUserId = this.generateShortUserId(submissionData.user_id);
 
-            // Calculate total rewards earned
-            let totalRewardsEarned = 0;
-            for (const completion of completions) {
-                if (completion.reward) {
-                    totalRewardsEarned += parseFloat(completion.reward) || 0;
-                }
+            // Generate unique reference number for verification
+            const referenceNumber = this.generateUniqueReference('verification');
+
+            const submissionRef = await db.collection(this.collections.taskSubmissions).add({
+                task_id: submissionData.task_id,
+                taskId: submissionData.task_id, // Also store as taskId for consistency
+                user_id: submissionData.user_id,
+                userId: submissionData.user_id, // Also store as userId for consistency
+                user_email: userData.email || 'Unknown User',
+                user_short_id: shortUserId,
+                status: submissionData.status || 'pending_review', // Use the status passed in, default to pending_review
+                restart_count: submissionData.restart_count || 0,
+                referrer_email: submissionData.referrer_email || null,
+                proof_image_url: submissionData.proof_image_url || null,
+                notes: submissionData.notes || '',
+                referenceNumber: referenceNumber,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return { id: submissionRef.id, referenceNumber: referenceNumber };
+        }, 'Creating Submission', 'Please wait while we create your task submission...');
+    }
+
+    async getTaskSubmissions(status = 'all') {
+        try {
+            let query = db.collection(this.collections.taskSubmissions);
+
+            if (status !== 'all') {
+                query = query.where('status', '==', status);
             }
 
-            console.log(`User ${userId} completion stats: ${totalCompletions} completions, ₱${totalRewardsEarned} earned`);
-            return {
-                totalCompletions,
-                totalRewardsEarned
+            const snapshot = await query.orderBy('created_at', 'desc').get();
+            const submissions = [];
+
+            for (const doc of snapshot.docs) {
+                const submission = { id: doc.id, ...doc.data() };
+
+                // Get task details
+                console.log('🔍 Fetching task details for submission:', submission.id, 'task_id:', submission.task_id);
+                const taskDoc = await db.collection(this.collections.tasks).doc(submission.task_id).get();
+                if (taskDoc.exists) {
+                    submission.task = { id: taskDoc.id, ...taskDoc.data() };
+                    console.log('✅ Task found:', submission.task.title);
+                } else {
+                    console.log('❌ Task not found for ID:', submission.task_id);
+                }
+
+                // Get user details
+                const userDoc = await db.collection(this.collections.users).doc(submission.user_id).get();
+                if (userDoc.exists) {
+                    submission.user = { id: userDoc.id, ...userDoc.data() };
+                }
+
+                submissions.push(submission);
+            }
+
+            return submissions;
+        } catch (error) {
+            console.error('Error getting task submissions:', error);
+            throw error;
+        }
+    }
+
+    async updateTaskSubmission(submissionId, updateData) {
+        return await window.loadingManager.withDatabaseLoading(async () => {
+            const submissionRef = db.collection(this.collections.taskSubmissions).doc(submissionId);
+            const submissionDoc = await submissionRef.get();
+
+            if (!submissionDoc.exists) {
+                throw new Error('Submission not found');
+            }
+
+            // Add timestamp to updates
+            updateData.updated_at = firebase.firestore.FieldValue.serverTimestamp();
+
+            await submissionRef.update(updateData);
+            return { success: true };
+        }, 'Updating Submission', 'Please wait while we update your submission...');
+    }
+
+    async updateTaskSubmissionStatus(submissionId, status, adminNotes = '') {
+        try {
+            const submissionRef = db.collection(this.collections.taskSubmissions).doc(submissionId);
+            const submissionDoc = await submissionRef.get();
+
+            if (!submissionDoc.exists) {
+                throw new Error('Submission not found');
+            }
+
+            const submission = submissionDoc.data();
+            const updates = {
+                status: status,
+                updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+                reviewed_by: auth.currentUser.uid,
+                reviewed_at: firebase.firestore.FieldValue.serverTimestamp()
             };
-        } catch (error) {
-            console.error('Error getting user completion stats:', error);
-            throw error;
-        }
-    }
 
-    async getUserQuestCompletionCount(userId, taskId) {
-        try {
-            // Count completions from the questCompletions collection (same as admin)
-            const snapshot = await db.collection('questCompletions')
-                .where('userId', '==', userId)
-                .where('taskId', '==', taskId)
-                .get();
+            if (adminNotes) {
+                updates.admin_notes = adminNotes;
+            }
 
-            return snapshot.docs.length;
-        } catch (error) {
-            console.error('Error getting user quest completion count:', error);
-            return 0; // Return 0 on error to prevent blocking the UI
-        }
-    }
+            // If approved, credit the user's balance
+            if (status === 'approved') {
+                const taskDoc = await db.collection(this.collections.tasks).doc(submission.task_id).get();
+                if (taskDoc.exists) {
+                    const task = taskDoc.data();
+                    await this.updateWalletBalance(submission.user_id, task.reward, 'task_approved', {
+                        taskId: submission.task_id,
+                        taskTitle: task.title,
+                        submissionId: submissionId,
+                        referenceNumber: submission.referenceNumber
+                    });
 
-    async getAllQuestCompletions() {
-        try {
-            // Get all quest completions from the questCompletions collection
-            const snapshot = await db.collection('questCompletions')
-                .orderBy('completedAt', 'desc')
-                .get();
-
-            const completions = [];
-            for (const doc of snapshot.docs) {
-                const data = doc.data();
-                // Get task and user details
-                const task = await this.getTask(data.taskId);
-                const user = await this.getUser(data.userId);
-
-                if (task && user) {
-                    completions.push({
-                        id: doc.id,
-                        ...data,
-                        task: task,
-                        user: user
+                    // Create notification
+                    await this.createNotification(submission.user_id, {
+                        type: 'task_approved',
+                        title: 'Task Approved!',
+                        message: `Your submission for "${task.title}" has been approved. You earned ₱${task.reward}!`,
+                        data: { task_id: submission.task_id, reward: task.reward }
+                    });
+                }
+            } else if (status === 'rejected') {
+                // Create notification
+                const taskDoc = await db.collection(this.collections.tasks).doc(submission.task_id).get();
+                if (taskDoc.exists) {
+                    const task = taskDoc.data();
+                    await this.createNotification(submission.user_id, {
+                        type: 'task_rejected',
+                        title: 'Task Rejected',
+                        message: `Your submission for "${task.title}" was rejected. ${adminNotes || 'Please try again.'}`,
+                        data: { task_id: submission.task_id }
                     });
                 }
             }
 
-            console.log('Found quest completions:', completions.length);
-            return completions;
+            await submissionRef.update(updates);
+            return true;
         } catch (error) {
-            console.error('Error getting all quest completions:', error);
+            console.error('Error updating task submission:', error);
             throw error;
         }
     }
 
-    async getTasksWithCompletionLimits() {
+    // Enhanced Withdrawal Management
+    async createWithdrawalRequest(withdrawalData) {
         try {
-            // Get all active tasks (not just those with completion limits set)
-            const snapshot = await db.collection(this.collections.tasks)
-                .where('status', '==', 'active')
+            // Get user info for email and short ID
+            const userDoc = await db.collection('users').doc(withdrawalData.user_id).get();
+            const userData = userDoc.exists ? userDoc.data() : {};
+
+            // Generate short user ID
+            const shortUserId = this.generateShortUserId(withdrawalData.user_id);
+
+            // Generate unique reference number for withdrawal
+            const referenceNumber = this.generateUniqueReference('withdrawal');
+
+            const withdrawalRef = await db.collection(this.collections.withdrawals).add({
+                user_id: withdrawalData.user_id,
+                userId: withdrawalData.user_id, // Also store as userId for consistency
+                user_email: userData.email || 'Unknown User',
+                user_short_id: shortUserId,
+                amount: withdrawalData.amount,
+                method: withdrawalData.method,
+                account: withdrawalData.account_details, // Store as 'account' for consistency
+                account_details: withdrawalData.account_details,
+                status: 'pending',
+                referenceNumber: referenceNumber,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return { id: withdrawalRef.id, referenceNumber: referenceNumber };
+        } catch (error) {
+            console.error('Error creating withdrawal request:', error);
+            throw error;
+        }
+    }
+
+    async createWithdrawalRequestWithBalanceDeduction(withdrawalData) {
+        try {
+            // Get user info for email and short ID
+            const userDoc = await db.collection('users').doc(withdrawalData.user_id).get();
+            const userData = userDoc.exists ? userDoc.data() : {};
+
+            // Generate short user ID
+            const shortUserId = this.generateShortUserId(withdrawalData.user_id);
+
+            // Generate unique reference number for withdrawal
+            const referenceNumber = this.generateUniqueReference('withdrawal');
+
+            let withdrawalId;
+            let beforeBalance = 0;
+            let afterBalance = 0;
+
+            // Use a transaction to ensure both withdrawal creation and balance deduction succeed together
+            await db.runTransaction(async (transaction) => {
+                // Get user document
+                const userRef = db.collection(this.collections.users).doc(withdrawalData.user_id);
+                const userDoc = await transaction.get(userRef);
+
+                if (!userDoc.exists) {
+                    throw new Error('User does not exist');
+                }
+
+                // Check sufficient balance
+                beforeBalance = userDoc.data().walletBalance || 0;
+                afterBalance = beforeBalance - withdrawalData.amount;
+
+                if (afterBalance < 0) {
+                    throw new Error('Insufficient balance');
+                }
+
+                // Update user balance
+                transaction.update(userRef, { walletBalance: afterBalance });
+
+                // Create withdrawal document
+                const withdrawalRef = db.collection(this.collections.withdrawals).doc();
+                withdrawalId = withdrawalRef.id;
+
+                transaction.set(withdrawalRef, {
+                    user_id: withdrawalData.user_id,
+                    userId: withdrawalData.user_id,
+                    user_email: userData.email || 'Unknown User',
+                    user_short_id: shortUserId,
+                    amount: withdrawalData.amount,
+                    method: withdrawalData.method,
+                    account: withdrawalData.account_details,
+                    account_details: withdrawalData.account_details,
+                    status: 'pending',
+                    referenceNumber: referenceNumber,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                    updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            });
+
+            // Record the balance change in transaction history (outside transaction to avoid conflicts)
+            await this.recordBalanceChange(withdrawalData.user_id, {
+                beforeBalance,
+                afterBalance,
+                changeAmount: -withdrawalData.amount,
+                reason: 'withdrawal_submitted',
+                metadata: {
+                    paymentMethod: withdrawalData.method,
+                    referenceNumber: referenceNumber,
+                    withdrawalAmount: withdrawalData.amount
+                },
+                timestamp: new Date()
+            });
+
+            return { id: withdrawalId, referenceNumber: referenceNumber };
+        } catch (error) {
+            console.error('Error creating withdrawal request with balance deduction:', error);
+            throw error;
+        }
+    }
+
+    generateShortUserId(userId) {
+        if (!userId) return 'Q00000';
+
+        // Generate a short ID based on the Firebase user ID
+        // Take first 5 characters and convert to a more readable format
+        const shortId = 'Q' + userId.substring(0, 5).toUpperCase();
+        return shortId;
+    }
+
+    // Unique Reference Generation System
+    generateUniqueReference(type) {
+        const timestamp = Date.now().toString();
+        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        const prefix = type === 'withdrawal' ? 'QW' : 'QV';
+        return `${prefix}${timestamp.slice(-6)}${random}`;
+    }
+
+    async getWithdrawals(status = 'all') {
+        try {
+            let query = db.collection(this.collections.withdrawals);
+
+            if (status !== 'all') {
+                query = query.where('status', '==', status);
+            }
+
+            const snapshot = await query.orderBy('created_at', 'desc').get();
+            const withdrawals = [];
+
+            for (const doc of snapshot.docs) {
+                const withdrawal = { id: doc.id, ...doc.data() };
+
+                // Get user details
+                const userDoc = await db.collection(this.collections.users).doc(withdrawal.user_id).get();
+                if (userDoc.exists) {
+                    withdrawal.user = { id: userDoc.id, ...userDoc.data() };
+                }
+
+                withdrawals.push(withdrawal);
+            }
+
+            return withdrawals;
+        } catch (error) {
+            console.error('Error getting withdrawals:', error);
+            throw error;
+        }
+    }
+
+    async updateWithdrawalStatus(withdrawalId, status, adminNotes = '') {
+        try {
+            const withdrawalRef = db.collection(this.collections.withdrawals).doc(withdrawalId);
+            const withdrawalDoc = await withdrawalRef.get();
+
+            if (!withdrawalDoc.exists) {
+                throw new Error('Withdrawal not found');
+            }
+
+            const withdrawal = withdrawalDoc.data();
+            const updates = {
+                status: status,
+                updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+                reviewed_by: auth.currentUser.uid,
+                reviewed_at: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            if (adminNotes) {
+                updates.admin_notes = adminNotes;
+            }
+
+            // Update the withdrawal document with the new status
+            await withdrawalRef.update(updates);
+
+            // If approved, record the approval (balance was already deducted when user submitted)
+            if (status === 'approved') {
+                // Get current user balance to record the approval event
+                const userDoc = await db.collection(this.collections.users).doc(withdrawal.user_id).get();
+                const currentBalance = userDoc.exists ? userDoc.data().walletBalance || 0 : 0;
+
+                // Record the approval as a balance change event (no actual balance change)
+                await this.recordBalanceChange(withdrawal.user_id, {
+                    beforeBalance: currentBalance,
+                    afterBalance: currentBalance,
+                    changeAmount: 0, // No actual change, just status update
+                    reason: 'withdrawal_approved',
+                    metadata: {
+                        withdrawalId: withdrawalId,
+                        paymentMethod: withdrawal.method || withdrawal.payment_method,
+                        referenceNumber: withdrawal.referenceNumber || withdrawal.reference_number,
+                        withdrawalAmount: withdrawal.amount
+                    },
+                    timestamp: new Date()
+                });
+
+                // Create notification
+                await this.createNotification(withdrawal.user_id, {
+                    type: 'withdrawal_approved',
+                    title: 'Withdrawal Approved!',
+                    message: `Your withdrawal of ₱${withdrawal.amount} has been approved and will be processed shortly.`,
+                    data: {
+                        withdrawal_id: withdrawalId,
+                        amount: withdrawal.amount,
+                        paymentMethod: withdrawal.method || withdrawal.payment_method,
+                        referenceNumber: withdrawal.referenceNumber || withdrawal.reference_number
+                    }
+                });
+            } else if (status === 'rejected') {
+                // Check if this withdrawal was created with the new atomic method
+                // Only refund if the withdrawal was actually created with balance deduction
+                const withdrawalDoc = await db.collection(this.collections.withdrawals).doc(withdrawalId).get();
+                const withdrawalData = withdrawalDoc.data();
+
+                // Always refund when rejecting a withdrawal to ensure user gets their money back
+                // This handles both old and new withdrawal methods
+                console.log('💰 Refunding withdrawal:', {
+                    withdrawalId: withdrawalId,
+                    userId: withdrawal.user_id,
+                    amount: withdrawal.amount,
+                    referenceNumber: withdrawal.referenceNumber || withdrawal.reference_number
+                });
+
+                // Use updateWalletBalance to both update balance and record the transaction
+                await this.updateWalletBalance(withdrawal.user_id, withdrawal.amount, 'withdrawal_rejected_refund', {
+                    withdrawalId: withdrawalId,
+                    paymentMethod: withdrawal.method || withdrawal.payment_method,
+                    referenceNumber: withdrawal.referenceNumber || withdrawal.reference_number,
+                    originalWithdrawalAmount: withdrawal.amount
+                });
+
+                // Create notification
+                await this.createNotification(withdrawal.user_id, {
+                    type: 'withdrawal_rejected',
+                    title: 'Withdrawal Rejected & Refunded',
+                    message: `Your withdrawal of ₱${withdrawal.amount} was rejected. The amount has been refunded to your wallet balance. ${adminNotes || 'Please contact support for more information.'}`,
+                    data: { withdrawal_id: withdrawalId, amount: withdrawal.amount, refunded: true }
+                });
+            }
+
+            await withdrawalRef.update(updates);
+            return true;
+        } catch (error) {
+            console.error('Error updating withdrawal status:', error);
+            throw error;
+        }
+    }
+
+    // Notification Management
+    async createNotification(userId, notificationData) {
+        try {
+            await db.collection(this.collections.notifications).add({
+                user_id: userId,
+                type: notificationData.type,
+                title: notificationData.title,
+                message: notificationData.message,
+                data: notificationData.data || {},
+                read: false,
+                created_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return true;
+        } catch (error) {
+            console.error('Error creating notification:', error);
+            throw error;
+        }
+    }
+
+    async getUserNotifications(userId, limit = 50) {
+        try {
+            const snapshot = await db.collection(this.collections.notifications)
+                .where('user_id', '==', userId)
+                .orderBy('created_at', 'desc')
+                .limit(limit)
                 .get();
 
-            return snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
+            const notifications = [];
+            snapshot.forEach(doc => {
+                notifications.push({ id: doc.id, ...doc.data() });
+            });
+
+            return notifications;
         } catch (error) {
-            console.error('Error getting tasks with completion limits:', error);
+            console.error('Error getting user notifications:', error);
+            throw error;
+        }
+    }
+
+    async markNotificationAsRead(notificationId) {
+        try {
+            await db.collection(this.collections.notifications).doc(notificationId).update({
+                read: true,
+                read_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return true;
+        } catch (error) {
+            console.error('Error marking notification as read:', error);
+            throw error;
+        }
+    }
+
+    // Enhanced User Balance Management
+    async getUserBalance(userId) {
+        try {
+            const userDoc = await db.collection(this.collections.users).doc(userId).get();
+            if (userDoc.exists) {
+                return userDoc.data().walletBalance || 0;
+            }
+            return 0;
+        } catch (error) {
+            console.error('Error getting user balance:', error);
+            throw error;
+        }
+    }
+
+    async getUserTaskSubmissions(userId) {
+        try {
+            const snapshot = await db.collection(this.collections.taskSubmissions)
+                .where('user_id', '==', userId)
+                .orderBy('created_at', 'desc')
+                .get();
+
+            const submissions = [];
+            for (const doc of snapshot.docs) {
+                const submission = { id: doc.id, ...doc.data() };
+
+                // Get task details
+                const taskDoc = await db.collection(this.collections.tasks).doc(submission.task_id).get();
+                if (taskDoc.exists) {
+                    submission.task = { id: taskDoc.id, ...taskDoc.data() };
+                }
+
+                submissions.push(submission);
+            }
+
+            return submissions;
+        } catch (error) {
+            console.error('Error getting user task submissions:', error);
+            throw error;
+        }
+    }
+
+    async deleteTaskSubmission(submissionId) {
+        try {
+            await db.collection(this.collections.taskSubmissions).doc(submissionId).delete();
+            console.log(`✅ Deleted task submission: ${submissionId}`);
+            return { success: true };
+        } catch (error) {
+            console.error('Error deleting task submission:', error);
             throw error;
         }
     }
@@ -661,168 +1035,10 @@ class FirestoreManager {
     async deleteVerification(verificationId) {
         try {
             await db.collection(this.collections.verifications).doc(verificationId).delete();
-            console.log('Verification deleted:', verificationId);
+            console.log(`✅ Deleted verification: ${verificationId}`);
+            return { success: true };
         } catch (error) {
             console.error('Error deleting verification:', error);
-            throw error;
-        }
-    }
-
-    async approveImmutableLink(userId, taskId) {
-        try {
-            // Find the task status with immutable link for this user and task
-            const taskStatusDoc = await db.collection(this.collections.taskStatuses)
-                .doc(`${userId}_${taskId}`)
-                .get();
-
-            if (!taskStatusDoc.exists) {
-                throw new Error('No task status found for this user and task');
-            }
-
-            const taskStatusData = taskStatusDoc.data();
-
-            // Check if it has an immutable link
-            if (!taskStatusData.immutableLink) {
-                throw new Error('No immutable link found for this user and task');
-            }
-
-            // Update the task status to ready for phase 2 after admin approval
-            await taskStatusDoc.ref.update({
-                status: 'ready_for_phase2',
-                phase: 'immutable_link',
-                immutableLinkApproved: true,
-                approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                approvedBy: auth.currentUser.uid
-            });
-
-            console.log('Immutable link approved for user:', userId, 'task:', taskId);
-        } catch (error) {
-            console.error('Error approving immutable link:', error);
-            throw error;
-        }
-    }
-
-    async rejectImmutableLink(userId, taskId, reason) {
-        try {
-            // Find the task status with immutable link for this user and task
-            const taskStatusDoc = await db.collection(this.collections.taskStatuses)
-                .doc(`${userId}_${taskId}`)
-                .get();
-
-            if (!taskStatusDoc.exists) {
-                throw new Error('No task status found for this user and task');
-            }
-
-            const taskStatusData = taskStatusDoc.data();
-
-            // Check if it has an immutable link
-            if (!taskStatusData.immutableLink) {
-                throw new Error('No immutable link found for this user and task');
-            }
-
-            // Update the task status to rejected
-            await taskStatusDoc.ref.update({
-                status: 'rejected',
-                phase: 'immutable_link',
-                rejectedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                rejectedBy: auth.currentUser.uid,
-                rejectionReason: reason
-            });
-
-            console.log('Immutable link rejected for user:', userId, 'task:', taskId, 'reason:', reason);
-        } catch (error) {
-            console.error('Error rejecting immutable link:', error);
-            throw error;
-        }
-    }
-
-    async recordQuestCompletion(userId, taskId, completionData) {
-        try {
-            // Record the quest completion in a separate collection for analytics
-            await db.collection('questCompletions').add({
-                userId,
-                taskId,
-                ...completionData,
-                completedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                completedBy: auth.currentUser.uid
-            });
-
-            console.log('Quest completion recorded for user:', userId, 'task:', taskId);
-        } catch (error) {
-            console.error('Error recording quest completion:', error);
-            throw error;
-        }
-    }
-
-    async getQuestCompletionCount(taskId) {
-        try {
-            // Count completions from the questCompletions collection
-            const snapshot = await db.collection('questCompletions')
-                .where('taskId', '==', taskId)
-                .get();
-
-            return snapshot.docs.length;
-        } catch (error) {
-            console.error('Error getting quest completion count:', error);
-            return 0;
-        }
-    }
-
-    async resetImmutableLinkApproval(userId, taskId) {
-        try {
-            // Reset the immutable link approval status for testing
-            const taskStatusDoc = await db.collection(this.collections.taskStatuses)
-                .doc(`${userId}_${taskId}`)
-                .get();
-
-            if (taskStatusDoc.exists) {
-                await taskStatusDoc.ref.update({
-                    immutableLinkApproved: false,
-                    status: 'ready_for_phase2',
-                    phase: 'immutable_link'
-                });
-                console.log('Immutable link approval reset for user:', userId, 'task:', taskId);
-            }
-        } catch (error) {
-            console.error('Error resetting immutable link approval:', error);
-            throw error;
-        }
-    }
-
-    async resetAllImmutableLinkApprovals() {
-        try {
-            // Reset all immutable link approvals to pending for testing
-            const snapshot = await db.collection(this.collections.taskStatuses)
-                .where('immutableLink', '!=', null)
-                .get();
-
-            const batch = db.batch();
-            snapshot.docs.forEach(doc => {
-                batch.update(doc.ref, {
-                    immutableLinkApproved: false,
-                    status: 'ready_for_phase2',
-                    phase: 'immutable_link'
-                });
-            });
-
-            await batch.commit();
-            console.log(`Reset ${snapshot.docs.length} immutable link approvals to pending`);
-        } catch (error) {
-            console.error('Error resetting all immutable link approvals:', error);
-            throw error;
-        }
-    }
-
-    async updateTaskMaxCompletions(taskId, maxCompletions) {
-        try {
-            await db.collection(this.collections.tasks).doc(taskId).update({
-                maxCompletions: maxCompletions,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            console.log(`Task ${taskId} max completions updated to ${maxCompletions}`);
-        } catch (error) {
-            console.error('Error updating task max completions:', error);
             throw error;
         }
     }
@@ -830,3 +1046,4 @@ class FirestoreManager {
 
 // Initialize Firestore manager
 window.firestoreManager = new FirestoreManager();
+

@@ -5,15 +5,176 @@ class DashboardHandler {
         this.isAdmin = false;
         this.isSubmittingWithdrawal = false;
         this.lastWithdrawalTime = null;
-        this.withdrawalCooldown = 5000; // 5 seconds cooldown
+        this.withdrawalCooldown = 60000; // 1 minute cooldown
+        this.initialLoadingId = null; // Track the initial loading state
+        this.dataLoaded = {
+            userData: false,
+            tasks: false,
+            wallet: false,
+            notifications: false
+        };
+        this.cache = new Map(); // Add caching for Firebase requests
         this.init();
+    }
+
+    // Cache management methods
+    setCachedTasks(cacheKey, tasks) {
+        this.cache.set(cacheKey, {
+            data: tasks,
+            timestamp: Date.now()
+        });
+    }
+
+    getCachedTasks(cacheKey) {
+        const cached = this.cache.get(cacheKey);
+        return cached || null;
+    }
+
+    setCachedUserStatus(cacheKey, status) {
+        this.cache.set(cacheKey, {
+            data: status,
+            timestamp: Date.now()
+        });
+    }
+
+    getCachedUserStatus(cacheKey) {
+        const cached = this.cache.get(cacheKey);
+        return cached || null;
+    }
+
+    clearCache() {
+        this.cache.clear();
+        console.log('🧹 Cache cleared');
+    }
+
+    // Clear cache when tasks are updated
+    clearTaskCache() {
+        const keysToRemove = [];
+        for (const key of this.cache.keys()) {
+            if (key.includes('tasks') || key.includes('user_status')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => this.cache.delete(key));
+        console.log('🧹 Task cache cleared:', keysToRemove);
+    }
+
+    clearExpiredLocalStorageFlags() {
+        try {
+            console.log('🧹 Clearing expired localStorage flags...');
+
+            // Get all localStorage keys that start with 'task_expired_'
+            const expiredKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('task_expired_')) {
+                    expiredKeys.push(key);
+                }
+            }
+
+            console.log('🧹 Found', expiredKeys.length, 'expired localStorage flags');
+
+            // Note: We don't actually clear them here because we need to check if tasks are still expired
+            // This method is called during force refresh, and the task status logic will handle
+            // determining if tasks are still expired or not
+            // The localStorage flags will be naturally cleared when tasks are no longer expired
+
+        } catch (error) {
+            console.error('Error clearing expired localStorage flags:', error);
+        }
+    }
+
+    // Batch load user statuses to reduce Firebase requests
+    async batchLoadUserStatuses(tasks, forceRefresh = false) {
+        try {
+            console.log('🔄 Batch loading user statuses for', tasks.length, 'tasks');
+
+            // Single request to get all user task statuses
+            const allUserStatuses = await this.getAllUserTaskStatuses(forceRefresh);
+
+            // Single request to get all user submissions
+            const allSubmissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = allSubmissions.filter(s => s.user_id === this.currentUser.uid);
+
+            // Attach statuses to tasks without making individual requests
+            tasks.forEach(task => {
+                const taskStatus = allUserStatuses.find(s => s.taskId === task.id);
+                const taskSubmissions = userSubmissions.filter(s => s.task_id === task.id);
+                const completionCount = taskSubmissions.filter(s =>
+                    s.status === 'completed' || s.status === 'approved'
+                ).length;
+
+                if (taskStatus) {
+                    task.userStatus = {
+                        ...taskStatus,
+                        completionCount: completionCount,
+                        maxCompletions: task.max_restarts ? task.max_restarts + 1 : 1
+                    };
+                    task.userStatusObject = task.userStatus;
+                } else {
+                    task.userStatus = {
+                        status: 'available',
+                        phase: null,
+                        completionCount: completionCount,
+                        maxCompletions: task.max_restarts ? task.max_restarts + 1 : 1
+                    };
+                    task.userStatusObject = task.userStatus;
+                }
+
+                // Check user time limits
+                this.checkUserTimeLimit(task);
+            });
+
+            console.log('✅ Batch loaded user statuses');
+        } catch (error) {
+            console.error('Error batch loading user statuses:', error);
+            // Fallback to individual loading
+            for (const task of tasks) {
+                await this.checkUserTimeLimit(task);
+            }
+        }
+    }
+
+    // Get all user task statuses in a single request
+    async getAllUserTaskStatuses(forceRefresh = false) {
+        try {
+            const cacheKey = `all_user_statuses_${this.currentUser.uid}`;
+            const cached = this.getCachedUserStatus(cacheKey);
+
+            if (!forceRefresh && cached && (Date.now() - cached.timestamp) < 60000) { // 1 minute cache
+                console.log('📦 Using cached user statuses');
+                return cached.data;
+            }
+
+            console.log('🔄 Loading all user task statuses from database');
+            const snapshot = await db.collection('taskStatuses')
+                .where('userId', '==', this.currentUser.uid)
+                .get();
+
+            const statuses = snapshot.docs.map(doc => ({
+                taskId: doc.data().taskId,
+                ...doc.data()
+            }));
+
+            this.setCachedUserStatus(cacheKey, statuses);
+            return statuses;
+        } catch (error) {
+            console.error('Error loading all user task statuses:', error);
+            return [];
+        }
     }
 
     init() {
         console.log('📱 Initializing Dashboard Handler...');
 
+        // Show loading immediately when dashboard loads
+        this.showInitialLoading();
+
         // Initialize withdrawal state from localStorage
         this.initializeWithdrawalState();
+
+        // Add global button click prevention
+        this.setupGlobalButtonProtection();
 
         // Wait for Firebase to be ready
         this.waitForFirebase().then(() => {
@@ -43,6 +204,45 @@ class DashboardHandler {
             } else {
                 console.log(`⏰ Withdrawal cooldown active: ${Math.ceil((this.withdrawalCooldown - timeSinceLastWithdrawal) / 1000)}s remaining`);
             }
+        }
+    }
+
+    // Show initial loading when dashboard first loads
+    showInitialLoading() {
+        console.log('🔄 Showing initial loading...');
+        this.initialLoadingId = window.loadingManager.showPageLoading(
+            'Loading Dashboard',
+            'Please wait while we load your data...'
+        );
+    }
+
+    // Hide initial loading when all data is loaded
+    hideInitialLoading() {
+        if (this.initialLoadingId) {
+            console.log('✅ Hiding initial loading - all data loaded');
+            window.loadingManager.hideLoading(this.initialLoadingId);
+            this.initialLoadingId = null;
+        }
+    }
+
+    // Check if all critical data has been loaded
+    checkAllDataLoaded() {
+        const allLoaded = Object.values(this.dataLoaded).every(loaded => loaded);
+        if (allLoaded && this.initialLoadingId) {
+            // Small delay to ensure UI is ready
+            setTimeout(() => {
+                this.hideInitialLoading();
+            }, 500);
+        }
+        return allLoaded;
+    }
+
+    // Mark specific data as loaded
+    markDataLoaded(type) {
+        if (this.dataLoaded.hasOwnProperty(type)) {
+            console.log(`✅ ${type} data loaded`);
+            this.dataLoaded[type] = true;
+            this.checkAllDataLoaded();
         }
     }
 
@@ -80,11 +280,13 @@ class DashboardHandler {
                 await this.checkAdminStatus();
                 await this.loadUserData();
                 this.setupTabNavigation();
+                this.setupRealtimeListeners();
 
                 // Test storage connectivity
                 await this.testStorageConnectivity();
             } else {
                 console.log('👤 No user, redirecting to login...');
+                this.cleanupRealtimeListeners();
                 window.location.href = '/login/';
             }
         });
@@ -119,6 +321,7 @@ class DashboardHandler {
                 // Check if user account is disabled
                 if (userData.status === 'disabled') {
                     this.showAccountDisabledNotice();
+                    this.updateUIForDisabledUser();
                     return;
                 }
 
@@ -144,6 +347,11 @@ class DashboardHandler {
                     userQuestaIdElement.textContent = this.generateQuestaId(this.currentUser.uid);
                 }
 
+                const userShortIdElement = document.getElementById('user-short-id');
+                if (userShortIdElement) {
+                    userShortIdElement.textContent = `ID: ${this.generateQuestaId(this.currentUser.uid)}`;
+                }
+
                 const walletBalanceElement = document.getElementById('wallet-balance');
                 if (walletBalanceElement) {
                     walletBalanceElement.textContent = `₱${userData.walletBalance || 0}`;
@@ -158,9 +366,14 @@ class DashboardHandler {
                 }
 
                 console.log('✅ User data loaded');
+
+                // Mark user data as loaded
+                this.markDataLoaded('userData');
             }
         } catch (error) {
             console.error('Error loading user data:', error);
+            // Mark as loaded even on error to prevent infinite loading
+            this.markDataLoaded('userData');
         }
     }
 
@@ -193,6 +406,41 @@ class DashboardHandler {
                 </div>
             `;
         }
+    }
+
+    updateUIForDisabledUser() {
+        // Disable withdrawal button
+        const withdrawBtn = document.getElementById('withdraw-btn');
+        if (withdrawBtn) {
+            withdrawBtn.disabled = true;
+            withdrawBtn.innerHTML = '<i class="fas fa-ban"></i> Account Disabled';
+            withdrawBtn.style.opacity = '0.6';
+            withdrawBtn.style.cursor = 'not-allowed';
+        }
+
+        // Disable notification button
+        const notificationBtn = document.getElementById('notification-btn');
+        if (notificationBtn) {
+            notificationBtn.disabled = true;
+            notificationBtn.style.opacity = '0.6';
+            notificationBtn.style.cursor = 'not-allowed';
+        }
+
+        // Hide wallet balance in navbar
+        const userBalanceElement = document.getElementById('user-balance');
+        if (userBalanceElement) {
+            userBalanceElement.textContent = 'Account Disabled';
+            userBalanceElement.style.color = '#ef4444';
+        }
+
+        // Update wallet balance display
+        const walletBalanceDisplay = document.getElementById('wallet-balance-display');
+        if (walletBalanceDisplay) {
+            walletBalanceDisplay.textContent = 'Account Disabled';
+            walletBalanceDisplay.style.color = '#ef4444';
+        }
+
+        console.log('🔒 UI updated for disabled user');
     }
 
     setupEventListeners() {
@@ -379,6 +627,13 @@ class DashboardHandler {
         if (withdrawalForm) {
             withdrawalForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+
+                // IMMEDIATE UI PROTECTION - Disable button instantly
+                const submitBtn = document.querySelector('#withdrawal-form button[type="submit"]');
+                if (submitBtn && !submitBtn.disabled) {
+                    this.setButtonLoading(submitBtn, true, 'Processing...');
+                }
+
                 this.submitWithdrawal();
             });
         }
@@ -389,11 +644,629 @@ class DashboardHandler {
                 this.closeAllModals();
             }
         });
+
+        // Cleanup listeners when page is unloaded
+        window.addEventListener('beforeunload', () => {
+            this.cleanupRealtimeListeners();
+        });
     }
 
     setupTabNavigation() {
         // Default to tasks tab so users can see available tasks immediately
         this.switchTab('tasks');
+    }
+
+    switchTab(tabName) {
+        console.log('🔄 Switching to tab:', tabName);
+
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.add('hidden');
+        });
+
+        // Show selected tab
+        const selectedTab = document.getElementById(`${tabName}-tab`);
+        if (selectedTab) {
+            selectedTab.classList.remove('hidden');
+            console.log('✅ Tab shown:', selectedTab.id);
+        } else {
+            console.log('❌ Tab not found:', `${tabName}-tab`);
+        }
+
+        // Load tab-specific data
+        this.loadTabData(tabName);
+    }
+
+    async loadTabData(tabName) {
+        console.log('📊 Loading data for tab:', tabName);
+
+        switch (tabName) {
+            case 'tasks':
+                await this.loadTasks();
+                break;
+            case 'wallet':
+                await this.loadWalletData();
+                break;
+            case 'activity':
+                await this.loadActivityData();
+                break;
+            case 'notifications':
+                await this.loadNotifications();
+                break;
+            case 'profile':
+                await this.loadProfileData();
+                break;
+        }
+    }
+
+    async loadWalletData() {
+        try {
+            console.log('💰 Loading wallet data...');
+
+            // Load current balance
+            const userData = await window.firestoreManager.getUser(this.currentUser.uid);
+            const currentBalance = userData ? userData.walletBalance || 0 : 0;
+
+            // Update balance display
+            const balanceDisplay = document.getElementById('wallet-balance-display');
+            if (balanceDisplay) {
+                balanceDisplay.textContent = `₱${currentBalance}`;
+            }
+
+            // Load transaction history
+            await this.loadTransactionHistory();
+
+        } catch (error) {
+            console.error('Error loading wallet data:', error);
+        }
+    }
+
+    async loadActivityData() {
+        try {
+            console.log('📊 Loading activity data...');
+
+            // Load all user activities (submissions, withdrawals, etc.)
+            await this.loadActivityHistory();
+
+        } catch (error) {
+            console.error('Error loading activity data:', error);
+        }
+    }
+
+    async loadProfileData() {
+        try {
+            console.log('👤 Loading profile data...');
+
+            // Load user profile information
+            const userData = await window.firestoreManager.getUser(this.currentUser.uid);
+            if (userData) {
+                // Update profile displays
+                const userEmail = document.getElementById('user-email');
+                const userUid = document.getElementById('user-uid');
+                const walletBalance = document.getElementById('wallet-balance');
+
+                if (userEmail) userEmail.textContent = userData.email;
+                if (userUid) userUid.textContent = this.currentUser.uid;
+                if (walletBalance) walletBalance.textContent = `₱${userData.walletBalance || 0}`;
+            }
+
+        } catch (error) {
+            console.error('Error loading profile data:', error);
+        }
+    }
+
+    async loadTransactionHistory() {
+        try {
+            console.log('💳 Loading transaction history...');
+
+            const historyContainer = document.getElementById('wallet-history');
+            if (!historyContainer) return;
+
+            // Get balance changes from the new collection
+            const balanceChanges = await this.getUserBalanceChanges();
+            console.log('Balance changes loaded:', balanceChanges);
+
+            // Get user's submissions (completed tasks) for additional context
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = submissions.filter(s =>
+                s.user_id === this.currentUser.uid && s.status === 'approved'
+            );
+            console.log('User submissions loaded:', userSubmissions);
+
+            // Get user's withdrawals for additional context
+            const withdrawals = await window.firestoreManager.getWithdrawalsByUser(this.currentUser.uid);
+            console.log('User withdrawals loaded:', withdrawals);
+            console.log('Current user ID:', this.currentUser.uid);
+
+            // Get user data for balance calculations
+            const userData = await window.firestoreManager.getUser(this.currentUser.uid);
+            console.log('User data loaded:', userData);
+
+            // Combine and sort all transactions by date
+            const allTransactions = [];
+
+            // Add balance changes (these are the primary source of truth)
+            console.log('Processing balance changes, count:', balanceChanges ? balanceChanges.length : 0);
+            if (balanceChanges && balanceChanges.length > 0) {
+                balanceChanges.forEach((change, index) => {
+                    console.log(`Processing balance change ${index}:`, change);
+
+                    // Skip only withdrawal_approved to avoid duplicates, but keep withdrawal_submitted and withdrawal_rejected_refund
+                    if (change.reason === 'withdrawal_approved') {
+                        console.log('Skipping withdrawal balance change:', change.reason);
+                        return;
+                    }
+
+                    // Special logging for refund transactions
+                    if (change.reason === 'withdrawal_rejected_refund') {
+                        console.log('💰 Processing REFUND transaction:', {
+                            reason: change.reason,
+                            amount: change.changeAmount,
+                            description: this.getBalanceChangeDescription(change),
+                            reference: change.metadata?.referenceNumber
+                        });
+                    }
+
+                    const transaction = {
+                        type: 'balance_change',
+                        amount: change.changeAmount,
+                        description: this.getBalanceChangeDescription(change),
+                        date: change.timestamp,
+                        reference: change.metadata?.referenceNumber || 'N/A',
+                        status: this.getStatusForReason(change.reason),
+                        beforeBalance: change.beforeBalance,
+                        afterBalance: change.afterBalance,
+                        metadata: change.metadata
+                    };
+
+                    console.log('Adding balance change transaction:', transaction);
+                    allTransactions.push(transaction);
+                });
+            }
+
+            // Skip adding task submissions separately since they're already covered by balance changes
+            // This prevents duplicate entries for the same task completion
+
+            // Add withdrawals (these show the current status) - always process these
+            console.log('Processing withdrawals, count:', withdrawals.length);
+            withdrawals.forEach((withdrawal, index) => {
+                console.log(`Processing withdrawal ${index}:`, withdrawal);
+
+                // Determine the correct status display
+                let statusDisplay = withdrawal.status;
+                let description = `Withdrawal Submitted: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+
+                // If approved, show as approved
+                if (withdrawal.status === 'approved') {
+                    statusDisplay = 'approved';
+                    description = `Withdrawal Approved: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+                } else if (withdrawal.status === 'rejected') {
+                    statusDisplay = 'rejected';
+                    description = `Withdrawal Rejected: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+                }
+
+                console.log(`🔄 Withdrawal ${withdrawal.id} status: ${withdrawal.status} -> ${statusDisplay}`);
+
+                // Calculate balance information for withdrawal
+                // For withdrawals, we need to simulate the balance change
+                const withdrawalAmount = withdrawal.amount || 0;
+                const currentBalance = userData?.walletBalance || 0;
+                const beforeBalance = currentBalance + withdrawalAmount; // Add back the withdrawn amount
+                const afterBalance = currentBalance;
+
+                const transaction = {
+                    type: 'withdrawal',
+                    amount: -withdrawal.amount,
+                    description: description,
+                    date: withdrawal.created_at || withdrawal.createdAt,
+                    reference: withdrawal.referenceNumber || withdrawal.reference_number || 'N/A',
+                    status: statusDisplay,
+                    beforeBalance: beforeBalance,
+                    afterBalance: afterBalance
+                };
+
+                console.log('Adding transaction:', transaction);
+                allTransactions.push(transaction);
+            });
+            console.log('All transactions after adding withdrawals:', allTransactions);
+
+            // Sort by date (newest first)
+            allTransactions.sort((a, b) => {
+                const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+                const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+                return dateB - dateA;
+            });
+
+            console.log('All transactions after processing:', allTransactions);
+
+            // Display transactions
+            if (allTransactions.length === 0) {
+                historyContainer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-wallet text-4xl mb-4 text-gray-400"></i>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">No Transactions Yet</h3>
+                        <p class="text-gray-500">Complete tasks to see your transaction history here.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            historyContainer.innerHTML = allTransactions.map(transaction => {
+                const date = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
+                const formattedDate = date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const isPositive = transaction.amount > 0;
+                const amountClass = isPositive ? 'text-green-600' : 'text-red-600';
+                const amountPrefix = isPositive ? '+' : '';
+                const icon = isPositive ? 'fa-plus-circle' : 'fa-minus-circle';
+                const iconClass = isPositive ? 'text-green-500' : 'text-red-500';
+
+                // Show balance change details
+                const balanceChangeInfo = transaction.beforeBalance !== undefined && transaction.afterBalance !== undefined
+                    ? `<div class="balance-change-info text-xs text-gray-500 mt-1">
+                         Balance: ₱${transaction.beforeBalance} → ₱${transaction.afterBalance}
+                       </div>`
+                    : '';
+
+                // Add status badge for withdrawals
+                const statusBadge = transaction.type === 'withdrawal' && transaction.status
+                    ? `<div class="transaction-status">
+                         <span class="status-badge status-${transaction.status}">${transaction.status.toUpperCase()}</span>
+                       </div>`
+                    : '';
+
+                // Determine transaction type and styling
+                const isEarning = transaction.amount > 0;
+                const transactionType = isEarning ? 'Earning' : 'Withdrawal';
+                const typeIcon = isEarning ? 'fa-plus-circle' : 'fa-minus-circle';
+                const typeClass = isEarning ? 'text-green-500' : 'text-red-500';
+
+                return `
+                    <div class="transaction-item">
+                        <div class="transaction-icon ${typeClass}">
+                            <i class="fas ${typeIcon}"></i>
+                        </div>
+                        <div class="transaction-details">
+                            <div class="transaction-header">
+                                <div class="transaction-type">${transactionType}</div>
+                                <div class="transaction-amount ${isEarning ? 'text-green-600' : 'text-red-600'}">
+                                    ${isEarning ? '+' : '-'}₱${Math.abs(transaction.amount)}
+                                </div>
+                            </div>
+                            <div class="transaction-description">${transaction.description}</div>
+                            <div class="transaction-meta">
+                                <span class="transaction-date">${formattedDate}</span>
+                                <span class="transaction-reference">Ref: ${transaction.reference}</span>
+                            </div>
+                            ${statusBadge}
+                            ${balanceChangeInfo}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+        } catch (error) {
+            console.error('Error loading transaction history:', error);
+            const historyContainer = document.getElementById('wallet-history');
+            if (historyContainer) {
+                historyContainer.innerHTML = `
+                    <div class="error-state">
+                        <i class="fas fa-exclamation-triangle text-4xl mb-4 text-red-400"></i>
+                        <h3 class="text-lg font-semibold text-red-600 mb-2">Error Loading History</h3>
+                        <p class="text-red-500">Unable to load transaction history. Please try again later.</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    async loadActivityHistory() {
+        try {
+            console.log('📈 Loading activity history...');
+
+            const activityContainer = document.getElementById('activity-history');
+            if (!activityContainer) return;
+
+            // Get balance changes for activity history
+            const balanceChanges = await this.getUserBalanceChanges();
+
+            // Get user's submissions
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = submissions.filter(s => s.user_id === this.currentUser.uid);
+
+            // Get user's withdrawals
+            const withdrawals = await window.firestoreManager.getWithdrawalsByUser(this.currentUser.uid);
+
+            // Combine all activities
+            const allActivities = [];
+
+            // Add balance change activities (primary source)
+            balanceChanges.forEach(change => {
+                // Skip withdrawal_approved to avoid duplicates with withdrawal activities
+                // Keep all other balance changes including task completions
+                if (change.reason === 'withdrawal_approved') {
+                    return;
+                }
+
+                allActivities.push({
+                    type: 'balance_change',
+                    action: change.reason,
+                    description: this.getBalanceChangeDescription(change),
+                    date: change.timestamp,
+                    reference: change.metadata?.referenceNumber || 'N/A',
+                    status: this.getStatusForReason(change.reason),
+                    details: {
+                        beforeBalance: change.beforeBalance,
+                        afterBalance: change.afterBalance,
+                        changeAmount: change.changeAmount,
+                        metadata: change.metadata
+                    }
+                });
+            });
+
+            // Skip adding task activities separately since they're already covered by balance changes
+            // This prevents duplicate entries for the same task completion
+
+            // Add withdrawal activities (these show the current status)
+            withdrawals.forEach(withdrawal => {
+                // Determine the correct action and description based on status
+                let action = 'withdrawal_submitted';
+                let description = `Withdrawal Submitted: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+
+                if (withdrawal.status === 'approved') {
+                    action = 'withdrawal_approved';
+                    description = `Withdrawal Approved: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+                } else if (withdrawal.status === 'rejected') {
+                    action = 'withdrawal_rejected';
+                    description = `Withdrawal Rejected: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
+                }
+
+                allActivities.push({
+                    type: 'withdrawal',
+                    action: action,
+                    description: description,
+                    date: withdrawal.created_at,
+                    reference: withdrawal.referenceNumber || withdrawal.reference_number || 'N/A',
+                    status: withdrawal.status,
+                    details: {
+                        amount: withdrawal.amount,
+                        paymentMethod: withdrawal.method || withdrawal.payment_method
+                    }
+                });
+            });
+
+            // Sort by date (newest first)
+            allActivities.sort((a, b) => {
+                const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+                const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+                return dateB - dateA;
+            });
+
+            // Display activities
+            if (allActivities.length === 0) {
+                activityContainer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-history text-4xl mb-4 text-gray-400"></i>
+                        <h3 class="text-lg font-semibold text-gray-600 mb-2">No Activity Yet</h3>
+                        <p class="text-gray-500">Your recent activities will appear here.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            activityContainer.innerHTML = allActivities.map(activity => {
+                const date = activity.date?.toDate ? activity.date.toDate() : new Date(activity.date);
+                const formattedDate = date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                let iconClass = 'text-blue-500';
+                let icon = 'fa-info-circle';
+                let statusClass = 'text-gray-600';
+
+                // Handle balance change activities
+                if (activity.type === 'balance_change') {
+                    const isPositive = activity.details?.changeAmount > 0;
+                    iconClass = isPositive ? 'text-green-500' : 'text-red-500';
+                    icon = isPositive ? 'fa-plus-circle' : 'fa-minus-circle';
+                    statusClass = isPositive ? 'text-green-600' : 'text-red-600';
+                } else {
+                    // Handle other activity types
+                    switch (activity.status) {
+                        case 'approved':
+                            iconClass = 'text-green-500';
+                            icon = 'fa-check-circle';
+                            statusClass = 'text-green-600';
+                            break;
+                        case 'rejected':
+                            iconClass = 'text-red-500';
+                            icon = 'fa-times-circle';
+                            statusClass = 'text-red-600';
+                            break;
+                        case 'pending_review':
+                            iconClass = 'text-yellow-500';
+                            icon = 'fa-clock';
+                            statusClass = 'text-yellow-600';
+                            break;
+                        case 'in_progress':
+                            iconClass = 'text-blue-500';
+                            icon = 'fa-play-circle';
+                            statusClass = 'text-blue-600';
+                            break;
+                    }
+                }
+
+                // Show balance change details for balance change activities
+                const balanceChangeInfo = activity.type === 'balance_change' && activity.details?.beforeBalance !== undefined
+                    ? `<div class="balance-change-info text-xs text-gray-500 mt-1">
+                         Balance: ₱${activity.details.beforeBalance} → ₱${activity.details.afterBalance}
+                       </div>`
+                    : '';
+
+                return `
+                    <div class="activity-item">
+                        <div class="activity-icon ${iconClass}">
+                            <i class="fas ${icon}"></i>
+                        </div>
+                        <div class="activity-details">
+                            <div class="activity-description">${activity.description}</div>
+                            <div class="activity-meta">
+                                <span class="activity-date">${formattedDate}</span>
+                                <span class="status-badge status-${activity.status}">${activity.status.replace('_', ' ').toUpperCase()}</span>
+                                <span class="activity-reference">Ref: ${activity.reference}</span>
+                            </div>
+                            ${balanceChangeInfo}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+        } catch (error) {
+            console.error('Error loading activity history:', error);
+            const activityContainer = document.getElementById('activity-history');
+            if (activityContainer) {
+                activityContainer.innerHTML = `
+                    <div class="error-state">
+                        <i class="fas fa-exclamation-triangle text-4xl mb-4 text-red-400"></i>
+                        <h3 class="text-lg font-semibold text-red-600 mb-2">Error Loading Activity</h3>
+                        <p class="text-red-500">Unable to load activity history. Please try again later.</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    setupRealtimeListeners() {
+        console.log('🔄 Setting up real-time listeners...');
+
+        // Listen to tasks changes
+        this.tasksListener = window.firestoreManager.listenToTasks((snapshot) => {
+            console.log('📋 Tasks updated in real-time:', snapshot.size, 'tasks');
+
+            // Convert snapshot to tasks array
+            const tasks = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+
+            // Update the tasks array
+            this.tasks = tasks;
+
+            // If we're on the tasks tab, refresh the display
+            const tasksTab = document.getElementById('tasks-tab');
+            if (tasksTab && !tasksTab.classList.contains('hidden')) {
+                this.loadTasks();
+            }
+        });
+
+        // Listen to user notifications
+        if (this.currentUser) {
+            this.notificationsListener = window.firestoreManager.listenToUserNotifications(this.currentUser.uid, (snapshot) => {
+                console.log('🔔 Notifications updated in real-time:', snapshot.size, 'notifications');
+
+                // If we're on the notifications tab, refresh the display
+                const notificationsTab = document.getElementById('notifications-tab');
+                if (notificationsTab && !notificationsTab.classList.contains('hidden')) {
+                    this.loadNotifications();
+                }
+            });
+
+            // Listen to user verifications (for activity tab)
+            this.verificationsListener = window.firestoreManager.listenToUserVerifications(this.currentUser.uid, (snapshot) => {
+                console.log('📋 Verifications updated in real-time:', snapshot.size, 'verifications');
+
+                // If we're on the activity tab, refresh the display
+                const activityTab = document.getElementById('activity-tab');
+                if (activityTab && !activityTab.classList.contains('hidden')) {
+                    this.loadActivityHistory();
+                }
+            });
+
+            // Listen to user withdrawals (for wallet and activity tabs)
+            this.withdrawalsListener = window.firestoreManager.listenToUserWithdrawals(this.currentUser.uid, (snapshot) => {
+                console.log('💰 Withdrawals updated in real-time:', snapshot.size, 'withdrawals');
+
+                // If we're on the wallet tab, refresh the display
+                const walletTab = document.getElementById('wallet-tab');
+                if (walletTab && !walletTab.classList.contains('hidden')) {
+                    this.loadWalletHistory();
+                }
+
+                // If we're on the activity tab, refresh the display
+                const activityTab = document.getElementById('activity-tab');
+                if (activityTab && !activityTab.classList.contains('hidden')) {
+                    this.loadActivityHistory();
+                }
+            });
+
+            // Listen to user document changes (for wallet balance updates)
+            this.userListener = db.collection('users').doc(this.currentUser.uid).onSnapshot((doc) => {
+                if (doc.exists) {
+                    const userData = doc.data();
+                    console.log('👤 User data updated in real-time:', userData);
+
+                    // Update wallet balance display
+                    const userBalanceElement = document.getElementById('user-balance');
+                    if (userBalanceElement) {
+                        userBalanceElement.textContent = `₱${userData.walletBalance || 0}`;
+                    }
+
+                    const walletBalanceDisplay = document.getElementById('wallet-balance-display');
+                    if (walletBalanceDisplay) {
+                        walletBalanceDisplay.textContent = `₱${userData.walletBalance || 0}`;
+                    }
+
+                    // If we're on the wallet tab, refresh the display
+                    const walletTab = document.getElementById('wallet-tab');
+                    if (walletTab && !walletTab.classList.contains('hidden')) {
+                        this.loadWalletHistory();
+                    }
+                }
+            });
+        }
+
+        console.log('✅ Real-time listeners set up successfully');
+    }
+
+    cleanupRealtimeListeners() {
+        console.log('🧹 Cleaning up real-time listeners...');
+
+        if (this.tasksListener) {
+            this.tasksListener();
+            this.tasksListener = null;
+        }
+
+        if (this.notificationsListener) {
+            this.notificationsListener();
+            this.notificationsListener = null;
+        }
+
+        if (this.verificationsListener) {
+            this.verificationsListener();
+            this.verificationsListener = null;
+        }
+
+        if (this.withdrawalsListener) {
+            this.withdrawalsListener();
+            this.withdrawalsListener = null;
+        }
+
+        if (this.userListener) {
+            this.userListener();
+            this.userListener = null;
+        }
+
+        console.log('✅ Real-time listeners cleaned up');
     }
 
     switchTab(tabName) {
@@ -454,13 +1327,94 @@ class DashboardHandler {
         return `Q${number.toString().padStart(5, '0')}`;
     }
 
-    async loadTasks() {
-        let pageLoading = null;
-
+    // Check if user's time limit has expired for a task
+    async checkUserTimeLimit(task) {
         try {
-            // Show loading indicator
-            pageLoading = this.showPageLoading('Loading quests...');
+            if (!task.user_time_limit_hours) return;
 
+            const startTimeKey = `task_start_${task.id}_${this.currentUser.uid}`;
+            const storedStartTime = localStorage.getItem(startTimeKey);
+
+            if (!storedStartTime) return; // Task not started yet
+
+            const startTime = new Date(storedStartTime);
+            const userTimeLimit = task.user_time_limit_hours * 60 * 60 * 1000; // Convert to milliseconds
+            const expirationTime = new Date(startTime.getTime() + userTimeLimit);
+            const now = new Date();
+
+            if (now > expirationTime) {
+                console.log(`⏰ User time limit expired for task ${task.title}`);
+                await this.handleTaskExpiration(task);
+            }
+        } catch (error) {
+            console.error('Error checking user time limit:', error);
+        }
+    }
+
+    // Handle task expiration - restart the task
+    async handleTaskExpiration(task) {
+        try {
+            const startTimeKey = `task_start_${task.id}_${this.currentUser.uid}`;
+
+            // Clear the start time
+            localStorage.removeItem(startTimeKey);
+
+            // Show expiration banner
+            this.showTaskExpirationBanner(task);
+
+            // Update task status in database if there's an active submission
+            const submissions = await db.collection('task_submissions')
+                .where('task_id', '==', task.id)
+                .where('user_id', '==', this.currentUser.uid)
+                .where('status', 'in', ['in_progress', 'pending_review'])
+                .get();
+
+            if (!submissions.empty) {
+                // Update the submission status to expired
+                const submission = submissions.docs[0];
+                await db.collection('task_submissions').doc(submission.id).update({
+                    status: 'expired',
+                    expired_at: firebase.firestore.FieldValue.serverTimestamp(),
+                    updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            // Reload tasks to refresh the display
+            await this.loadTasks();
+
+        } catch (error) {
+            console.error('Error handling task expiration:', error);
+        }
+    }
+
+    // Show task expiration banner
+    showTaskExpirationBanner(task) {
+        const banner = document.createElement('div');
+        banner.className = 'task-expiration-banner';
+        banner.innerHTML = `
+            <div class="banner-content">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>Task "${task.title}" has expired due to time limit. It has been restarted automatically.</span>
+                <button class="banner-close" onclick="this.parentElement.parentElement.remove()">&times;</button>
+            </div>
+        `;
+
+        // Insert at the top of the tasks container
+        const tasksContainer = document.getElementById('tasks-grid');
+        if (tasksContainer) {
+            tasksContainer.insertBefore(banner, tasksContainer.firstChild);
+
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (banner.parentNode) {
+                    banner.remove();
+                }
+            }, 10000);
+        }
+    }
+
+    async loadTasks(forceRefresh = false) {
+        try {
             // Check if user is authenticated
             if (!this.currentUser) {
                 console.log('User not authenticated yet, waiting...');
@@ -475,13 +1429,89 @@ class DashboardHandler {
                 return;
             }
 
-            console.log('Loading tasks...');
-            const tasks = await window.firestoreManager.getTasks();
+            console.log('Loading tasks...', forceRefresh ? '(force refresh)' : '');
+
+            // Clear cache if force refresh is requested
+            if (forceRefresh) {
+                this.clearTaskCache();
+
+                // Clear localStorage expiration flags for tasks that are no longer expired
+                // This handles cases where admin extended task deadlines
+                this.clearExpiredLocalStorageFlags();
+
+                // Show loading indicator on refresh button
+                const refreshBtn = document.querySelector('.refresh-btn');
+                if (refreshBtn) {
+                    const originalText = refreshBtn.innerHTML;
+                    refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+                    refreshBtn.disabled = true;
+
+                    // Restore button after loading
+                    setTimeout(() => {
+                        refreshBtn.innerHTML = originalText;
+                        refreshBtn.disabled = false;
+                    }, 2000);
+                }
+            }
+
+            // Use cached tasks if available and not too old (5 minutes), unless force refresh is requested
+            const tasksCacheKey = `tasks_${this.currentUser.uid}`;
+            const cachedTasksData = this.getCachedTasks(tasksCacheKey);
+
+            let tasks;
+            if (!forceRefresh && cachedTasksData && (Date.now() - cachedTasksData.timestamp) < 300000) { // 5 minutes cache
+                console.log('📦 Using cached tasks data');
+                tasks = cachedTasksData.data;
+            } else {
+                console.log('🔄 Loading tasks from database', forceRefresh ? '(force refresh)' : '');
+                tasks = await window.firestoreManager.getTasks();
+                // Cache the tasks
+                this.setCachedTasks(tasksCacheKey, tasks);
+            }
+
             console.log('Tasks loaded:', tasks);
 
-            // Filter only active tasks for users
-            const activeTasks = tasks.filter(task => task.status === 'active');
+            // Filter only active tasks for users and check for expiration
+            const activeTasks = tasks.filter(task => {
+                console.log(`🔍 Filtering task: ${task.title}`, {
+                    status: task.status,
+                    task_deadline_hours: task.task_deadline_hours,
+                    created_at: task.created_at,
+                    deadline: task.deadline
+                });
+
+                if (task.status !== 'active') {
+                    console.log(`❌ Task ${task.title} filtered out - status is "${task.status}", not "active"`);
+                    return false;
+                }
+
+                // Check if task deadline has expired - but don't filter out, just log for debugging
+                if (task.task_deadline_hours) {
+                    const taskCreatedAt = task.created_at?.toDate ? task.created_at.toDate() : new Date(task.created_at);
+                    const deadlineTime = new Date(taskCreatedAt.getTime() + (task.task_deadline_hours * 60 * 60 * 1000));
+                    const now = new Date();
+
+                    console.log(`⏰ Task ${task.title} deadline check:`, {
+                        taskCreatedAt: taskCreatedAt.toISOString(),
+                        deadlineTime: deadlineTime.toISOString(),
+                        now: now.toISOString(),
+                        isExpired: now > deadlineTime,
+                        hoursPassed: (now.getTime() - taskCreatedAt.getTime()) / (1000 * 60 * 60)
+                    });
+
+                    if (now > deadlineTime) {
+                        console.log(`📋 Task ${task.title} has ended (deadline: ${deadlineTime.toISOString()}) - will be marked as ended`);
+                        // Don't filter out - we want to show ended tasks but mark them as ended
+                    }
+                }
+
+                console.log(`✅ Task ${task.title} passed all filters`);
+                return true;
+            });
             console.log('Active tasks:', activeTasks);
+
+            // Batch load user statuses to reduce Firebase requests
+            await this.batchLoadUserStatuses(activeTasks, forceRefresh);
 
             // Log deadline information for debugging
             activeTasks.forEach((task, index) => {
@@ -492,7 +1522,9 @@ class DashboardHandler {
                     deadlineFormatted: this.formatDeadlineForTimer(task.deadline),
                     duration: task.duration,
                     userTimeLimit: task.userTimeLimit,
-                    userTimeLimitType: typeof task.userTimeLimit
+                    userTimeLimitType: typeof task.userTimeLimit,
+                    task_deadline_hours: task.task_deadline_hours,
+                    user_time_limit_hours: task.user_time_limit_hours
                 });
             });
 
@@ -545,34 +1577,35 @@ class DashboardHandler {
                     }
                 });
             };
+
+            // Mark tasks as loaded
+            this.markDataLoaded('tasks');
+
+            // Add debug function to window for testing
+            window.debugTaskStatus = (taskId) => this.debugTaskStatus(taskId);
+            // Add manual refresh function for debugging
+            window.forceRefreshTaskStatus = async (taskId) => {
+                console.log('🔄 Force refreshing task status for:', taskId);
+                try {
+                    // Force update from database
+                    const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
+                    console.log('📊 Fresh task status from database:', taskStatus);
+
+                    // Reload tasks to update UI
+                    await this.loadTasks();
+                    console.log('✅ Tasks reloaded');
+
+                    return taskStatus;
+                } catch (error) {
+                    console.error('❌ Error force refreshing task status:', error);
+                }
+            };
+
         } catch (error) {
             console.error('Error loading tasks:', error);
-            this.showToast('Failed to load tasks: ' + error.message, 'error');
-            this.renderTasks([]);
-        } finally {
-            this.hidePageLoading(pageLoading);
+            // Mark as loaded even on error to prevent infinite loading
+            this.markDataLoaded('tasks');
         }
-
-        // Add debug function to window for testing
-        window.debugTaskStatus = (taskId) => this.debugTaskStatus(taskId);
-
-        // Add manual refresh function for debugging
-        window.forceRefreshTaskStatus = async (taskId) => {
-            console.log('🔄 Force refreshing task status for:', taskId);
-            try {
-                // Force update from database
-                const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
-                console.log('📊 Fresh task status from database:', taskStatus);
-
-                // Reload tasks to update UI
-                await this.loadTasks();
-                console.log('✅ Tasks reloaded');
-
-                return taskStatus;
-            } catch (error) {
-                console.error('❌ Error force refreshing task status:', error);
-            }
-        };
     }
 
     startCountdownTimers() {
@@ -594,6 +1627,22 @@ class DashboardHandler {
     }
 
     initializeCountdownTimers() {
+        // Start periodic check for expired tasks
+        const expiredCheckTimer = setInterval(async () => {
+            try {
+                const tasks = await window.firestoreManager.getTasks();
+                const activeTasks = tasks.filter(task => task.status === 'active');
+
+                for (const task of activeTasks) {
+                    await this.checkUserTimeLimit(task);
+                }
+            } catch (error) {
+                console.error('Error checking expired tasks:', error);
+            }
+        }, 60000); // Check every minute
+
+        this.countdownTimers.push(expiredCheckTimer);
+
         const deadlineElements = document.querySelectorAll('.task-deadline-timer');
         console.log('Found deadline elements:', deadlineElements.length);
 
@@ -653,7 +1702,7 @@ class DashboardHandler {
             }
 
             if (timeLeft <= 0) {
-                textElement.textContent = 'Expired';
+                textElement.textContent = 'Ended';
                 element.classList.add('expired');
                 element.classList.remove('warning', 'critical');
                 return;
@@ -729,6 +1778,49 @@ class DashboardHandler {
         }
     }
 
+    formatCreatedDate(task) {
+        try {
+            // Check for created_at first (primary field)
+            let createdDate = task.created_at;
+
+            // Fallback to createdAt if created_at is not available
+            if (!createdDate) {
+                createdDate = task.createdAt;
+            }
+
+            if (!createdDate) {
+                return 'N/A';
+            }
+
+            // Handle Firestore Timestamp with toDate method
+            if (createdDate.toDate && typeof createdDate.toDate === 'function') {
+                return createdDate.toDate().toLocaleDateString();
+            }
+
+            // Handle Firestore Timestamp with seconds/nanoseconds
+            if (createdDate.seconds && typeof createdDate.seconds === 'number') {
+                const date = new Date(createdDate.seconds * 1000);
+                return date.toLocaleDateString();
+            }
+
+            // Handle regular Date object
+            if (createdDate instanceof Date) {
+                return createdDate.toLocaleDateString();
+            }
+
+            // Handle string or timestamp
+            if (typeof createdDate === 'string' || typeof createdDate === 'number') {
+                return new Date(createdDate).toLocaleDateString();
+            }
+
+            console.warn('Unknown created date format:', createdDate);
+            return 'N/A';
+        } catch (error) {
+            console.error('Error formatting created date:', error, task);
+            return 'N/A';
+        }
+    }
+
     calculateDeadlineDisplay(deadline) {
         try {
             if (!deadline) return 'No Deadline';
@@ -759,7 +1851,7 @@ class DashboardHandler {
             const timeLeft = deadlineDate.getTime() - now.getTime();
 
             if (timeLeft <= 0) {
-                return 'Expired';
+                return 'Ended';
             }
 
             const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
@@ -789,26 +1881,27 @@ class DashboardHandler {
 
         // For initial display (before user starts), show task availability time
         // Only use userTimeLimit after user has started the task
-        if (task.deadline) {
-            const result = this.calculateDeadlineDisplay(task.deadline);
+        const taskDeadline = task.deadline || task.task_deadline;
+        if (taskDeadline) {
+            const result = this.calculateDeadlineDisplay(taskDeadline);
             console.log(`📅 Using task deadline: ${result}`);
             return result;
-        } else if (task.userTimeLimit) {
+        } else if (task.userTimeLimit || task.user_time_limit_hours) {
             // Convert minutes to appropriate display format
-            const minutes = task.userTimeLimit;
+            const timeMinutes = task.userTimeLimit || (task.user_time_limit_hours * 60);
             let result;
-            if (minutes < 60) {
-                result = `${minutes}m`;
-            } else if (minutes < 1440) { // Less than 24 hours
-                const hours = Math.floor(minutes / 60);
-                const remainingMinutes = minutes % 60;
+            if (timeMinutes < 60) {
+                result = `${timeMinutes}m`;
+            } else if (timeMinutes < 1440) { // Less than 24 hours
+                const hours = Math.floor(timeMinutes / 60);
+                const remainingMinutes = timeMinutes % 60;
                 result = remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
             } else {
-                const days = Math.floor(minutes / 1440);
-                const remainingHours = Math.floor((minutes % 1440) / 60);
+                const days = Math.floor(timeMinutes / 1440);
+                const remainingHours = Math.floor((timeMinutes % 1440) / 60);
                 result = remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
             }
-            console.log(`⏰ Using userTimeLimit as fallback (${minutes} minutes): ${result}`);
+            console.log(`⏰ Using userTimeLimit as fallback (${timeMinutes} minutes): ${result}`);
             return result;
         } else if (task.duration) {
             const result = `${task.duration} days`;
@@ -842,7 +1935,7 @@ class DashboardHandler {
             return 'Completed';
         }
 
-        if ((storedStartTime || isTaskStarted) && task.userTimeLimit) {
+        if ((storedStartTime || isTaskStarted) && (task.userTimeLimit || task.user_time_limit_hours)) {
             // User has started - show countdown
             let startTime = storedStartTime;
 
@@ -866,22 +1959,43 @@ class DashboardHandler {
             }
 
             return remainingTime;
-        } else if (task.userTimeLimit) {
+        } else if (task.userTimeLimit || task.user_time_limit_hours) {
             // User hasn't started - show static user time limit
-            const minutes = task.userTimeLimit;
+            let userTimeMinutes = task.userTimeLimit || (task.user_time_limit_hours * 60);
+
+            // Cap user time limit to never exceed task deadline
+            if (task.deadline) {
+                let taskDeadline;
+                if (task.deadline.toDate && typeof task.deadline.toDate === 'function') {
+                    taskDeadline = task.deadline.toDate();
+                } else if (task.deadline.seconds) {
+                    taskDeadline = new Date(task.deadline.seconds * 1000);
+                } else {
+                    taskDeadline = new Date(task.deadline);
+                }
+
+                const now = new Date();
+                const remainingMinutesUntilDeadline = Math.max(0, Math.floor((taskDeadline.getTime() - now.getTime()) / (1000 * 60)));
+
+                // Cap user time limit to task deadline (with 1 minute buffer)
+                userTimeMinutes = Math.min(userTimeMinutes, Math.max(1, remainingMinutesUntilDeadline - 1));
+
+                console.log(`🕐 Capped user time limit: original=${task.userTimeLimit || (task.user_time_limit_hours * 60)}min, deadline=${remainingMinutesUntilDeadline}min, final=${userTimeMinutes}min`);
+            }
+
             let result;
-            if (minutes < 60) {
-                result = `${minutes}m`;
-            } else if (minutes < 1440) { // Less than 24 hours
-                const hours = Math.floor(minutes / 60);
-                const remainingMinutes = minutes % 60;
+            if (userTimeMinutes < 60) {
+                result = `${userTimeMinutes}m`;
+            } else if (userTimeMinutes < 1440) { // Less than 24 hours
+                const hours = Math.floor(userTimeMinutes / 60);
+                const remainingMinutes = userTimeMinutes % 60;
                 result = remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
             } else {
-                const days = Math.floor(minutes / 1440);
-                const remainingHours = Math.floor((minutes % 1440) / 60);
+                const days = Math.floor(userTimeMinutes / 1440);
+                const remainingHours = Math.floor((userTimeMinutes % 1440) / 60);
                 result = remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
             }
-            console.log(`⏰ User time display (${minutes} minutes): ${result}`);
+            console.log(`⏰ User time display (${userTimeMinutes} minutes): ${result}`);
             return result;
         } else if (task.duration) {
             const result = `${task.duration}d`;
@@ -905,18 +2019,18 @@ class DashboardHandler {
                 // Show task deadline first (availability), then user time limit as fallback
                 if (task.deadline) {
                     return this.calculateDeadlineDisplay(task.deadline);
-                } else if (task.userTimeLimit) {
+                } else if (task.userTimeLimit || task.user_time_limit_hours) {
                     // Convert minutes to appropriate display format
-                    const minutes = task.userTimeLimit;
-                    if (minutes < 60) {
-                        return `${minutes}m`;
-                    } else if (minutes < 1440) { // Less than 24 hours
-                        const hours = Math.floor(minutes / 60);
-                        const remainingMinutes = minutes % 60;
+                    const displayMinutes = task.userTimeLimit || (task.user_time_limit_hours * 60);
+                    if (displayMinutes < 60) {
+                        return `${displayMinutes}m`;
+                    } else if (displayMinutes < 1440) { // Less than 24 hours
+                        const hours = Math.floor(displayMinutes / 60);
+                        const remainingMinutes = displayMinutes % 60;
                         return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
                     } else {
-                        const days = Math.floor(minutes / 1440);
-                        const remainingHours = Math.floor((minutes % 1440) / 60);
+                        const days = Math.floor(displayMinutes / 1440);
+                        const remainingHours = Math.floor((displayMinutes % 1440) / 60);
                         return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
                     }
                 } else if (task.duration) {
@@ -940,9 +2054,10 @@ class DashboardHandler {
 
             // Calculate user's completion deadline based on task duration
             let userCompletionDeadline = null;
-            if (task.userTimeLimit) {
+            if (task.userTimeLimit || task.user_time_limit_hours) {
                 // Use custom user time limit if set (in minutes)
-                userCompletionDeadline = new Date(startTime.getTime() + (task.userTimeLimit * 60 * 1000));
+                const completionMinutes = task.userTimeLimit || (task.user_time_limit_hours * 60);
+                userCompletionDeadline = new Date(startTime.getTime() + (completionMinutes * 60 * 1000));
             } else if (task.duration) {
                 // Use task duration in days
                 userCompletionDeadline = new Date(startTime.getTime() + (task.duration * 24 * 60 * 60 * 1000));
@@ -1008,13 +2123,14 @@ class DashboardHandler {
     // Local timer calculation based on stored start time - no database calls
     calculateLocalRemainingTime(task, startTime) {
         try {
-            if (!startTime || !task.userTimeLimit) {
+            if (!startTime || !(task.userTimeLimit || task.user_time_limit_hours)) {
                 return this.calculateRemainingTimeForUserSync(task);
             }
 
             const now = new Date();
             const start = new Date(startTime);
-            const userCompletionDeadline = new Date(start.getTime() + (task.userTimeLimit * 60 * 1000));
+            const userTimeMinutes = task.userTimeLimit || (task.user_time_limit_hours * 60);
+            const userCompletionDeadline = new Date(start.getTime() + (userTimeMinutes * 60 * 1000));
 
             // Also check task deadline
             let taskDeadline;
@@ -1090,7 +2206,8 @@ class DashboardHandler {
 
                 if (task) {
                     // Always show task deadline (availability time) in the badge
-                    const taskDeadlineText = task.deadline ? this.calculateDeadlineDisplay(task.deadline) : 'No Deadline';
+                    const taskDeadline = task.deadline || task.task_deadline;
+                    const taskDeadlineText = taskDeadline ? this.calculateDeadlineDisplay(taskDeadline) : 'No Deadline';
                     element.textContent = taskDeadlineText;
                 }
             }
@@ -1186,36 +2303,21 @@ class DashboardHandler {
             return;
         }
 
-        // Load task statuses and completion counts for all tasks
+        // Load task statuses for all tasks
         const tasksWithStatus = await Promise.all(tasks.map(async (task) => {
-            const status = await this.getTaskStatusForUser(task);
-            const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, task.id);
+            // Force refresh the task status to ensure we get the latest data
+            const status = await this.getUserTaskStatus(task.id);
 
             console.log(`📊 Loading task: ${task.title}`, {
-                completionCount: completionCount,
-                maxCompletions: task.maxCompletions || 1,
-                status: status
+                status: status,
+                statusString: status?.status,
+                fullObject: status
             });
-
-            // Store start time in localStorage if task is started
-            if (status.startedAt) {
-                const startTimeKey = `task_start_${task.id}_${this.currentUser.uid}`;
-                const startTime = status.startedAt.toDate ? status.startedAt.toDate().toISOString() : status.startedAt;
-                localStorage.setItem(startTimeKey, startTime);
-                console.log(`💾 Stored start time for ${task.title}: ${startTime}`);
-
-                // Sync timer data to database for admin view
-                if (window.syncTimerToDatabase) {
-                    window.syncTimerToDatabase(task.id, startTime);
-                }
-            }
 
             return {
                 ...task,
-                userStatus: status, // status is already a string from getTaskStatusForUser
-                userStatusObject: status, // Keep the status string for reference
-                completionCount: completionCount,
-                maxCompletions: task.maxCompletions || 1
+                userStatus: status,
+                userStatusObject: status
             };
         }));
 
@@ -1271,6 +2373,227 @@ class DashboardHandler {
             }
         };
 
+        // Add comprehensive task debugging function
+        window.debugAllTaskData = async () => {
+            console.log('🔍 COMPREHENSIVE TASK DEBUGGING...');
+            try {
+                // Check all tasks (including inactive ones)
+                const allTasks = await window.firestoreManager.getAllTasks();
+                console.log('📊 ALL Tasks from database (including inactive):', allTasks.length, 'tasks');
+
+                // Check only active tasks (what getTasks returns)
+                const activeTasks = await window.firestoreManager.getTasks();
+                console.log('✅ ACTIVE Tasks from database:', activeTasks.length, 'tasks');
+
+                // Show all task statuses
+                console.log('📋 Task Status Summary:');
+                const statusCounts = {};
+                allTasks.forEach(task => {
+                    statusCounts[task.status] = (statusCounts[task.status] || 0) + 1;
+                    console.log(`  - ${task.title}: Status = "${task.status}"`);
+                });
+
+                console.log('📊 Status Counts:', statusCounts);
+
+                // Show what's being filtered out
+                const inactiveTasks = allTasks.filter(task => task.status !== 'active');
+                if (inactiveTasks.length > 0) {
+                    console.log('🚫 INACTIVE Tasks (filtered out):', inactiveTasks.length, 'tasks');
+                    inactiveTasks.forEach(task => {
+                        console.log(`  ❌ "${task.title}" - Status: "${task.status}"`);
+                    });
+                } else {
+                    console.log('✅ All tasks are active');
+                }
+
+                // Check if there are any tasks at all
+                if (allTasks.length === 0) {
+                    console.log('⚠️ NO TASKS FOUND IN DATABASE AT ALL!');
+                    console.log('🔧 Possible solutions:');
+                    console.log('   1. Check if tasks were accidentally deleted');
+                    console.log('   2. Check database connection');
+                    console.log('   3. Verify collection name is "tasks"');
+                } else if (activeTasks.length === 0) {
+                    console.log('⚠️ NO ACTIVE TASKS FOUND!');
+                    console.log('🔧 Possible solutions:');
+                    console.log('   1. Set task status to "active" in admin panel');
+                    console.log('   2. Check if tasks have correct status field');
+                    console.log('   3. Verify task status values are exactly "active"');
+                }
+
+                return { allTasks, activeTasks, inactiveTasks, statusCounts };
+            } catch (error) {
+                console.error('❌ Error debugging task data:', error);
+                return null;
+            }
+        };
+
+        // Add function to fix task statuses (set all to active)
+        window.fixTaskStatuses = async () => {
+            console.log('🔧 FIXING TASK STATUSES...');
+            try {
+                const allTasks = await window.firestoreManager.getAllTasks();
+                console.log(`Found ${allTasks.length} tasks to check`);
+
+                let fixedCount = 0;
+                for (const task of allTasks) {
+                    if (task.status !== 'active') {
+                        console.log(`🔧 Fixing task: "${task.title}" (Status: "${task.status}" → "active")`);
+                        await window.firestoreManager.updateTask(task.id, { status: 'active' });
+                        fixedCount++;
+                    }
+                }
+
+                if (fixedCount > 0) {
+                    console.log(`✅ Fixed ${fixedCount} task statuses!`);
+                    this.showToast(`Fixed ${fixedCount} task statuses!`, 'success');
+                    // Reload tasks to show the changes
+                    setTimeout(() => {
+                        this.loadTasks();
+                    }, 1000);
+                } else {
+                    console.log('✅ All tasks already have "active" status');
+                    this.showToast('All tasks already have correct status', 'info');
+                }
+
+                return fixedCount;
+            } catch (error) {
+                console.error('❌ Error fixing task statuses:', error);
+                this.showToast('Failed to fix task statuses: ' + error.message, 'error');
+                return 0;
+            }
+        };
+
+        // Add function to debug admin save process
+        window.debugAdminSaveProcess = async () => {
+            console.log('🔧 DEBUGGING ADMIN SAVE PROCESS...');
+            try {
+                // Check if we're in admin context
+                if (typeof window.adminHandler === 'undefined') {
+                    console.log('❌ Not in admin context - this function should be run from admin panel');
+                    return;
+                }
+
+                // Get current tasks from admin
+                console.log('📊 Current admin tasks:', window.adminHandler.tasks);
+
+                // Check if there are any tasks with wrong status
+                const tasksWithWrongStatus = window.adminHandler.tasks.filter(task => task.status !== 'active');
+                if (tasksWithWrongStatus.length > 0) {
+                    console.log('⚠️ Found tasks with non-active status:', tasksWithWrongStatus);
+                    console.log('🔧 You can fix these by editing each task and setting status to "Active"');
+                } else {
+                    console.log('✅ All admin tasks have "active" status');
+                }
+
+                // Check database directly
+                const allTasks = await window.firestoreManager.getAllTasks();
+                console.log('📊 All tasks in database:', allTasks);
+
+                const activeTasks = allTasks.filter(task => task.status === 'active');
+                console.log('✅ Active tasks in database:', activeTasks.length);
+
+                return {
+                    adminTasks: window.adminHandler.tasks,
+                    allTasks,
+                    activeTasks,
+                    tasksWithWrongStatus
+                };
+            } catch (error) {
+                console.error('❌ Error debugging admin save process:', error);
+                return null;
+            }
+        };
+
+        // Add function to debug rendering process
+        window.debugRenderingProcess = async () => {
+            console.log('🎨 DEBUGGING RENDERING PROCESS...');
+            try {
+                // Check if tasks grid exists
+                const tasksGrid = document.getElementById('tasks-grid');
+                if (!tasksGrid) {
+                    console.log('❌ Tasks grid element not found!');
+                    return;
+                }
+                console.log('✅ Tasks grid element found');
+
+                // Check current content
+                console.log('📋 Current tasks grid content:', tasksGrid.innerHTML);
+
+                // Get raw tasks from database
+                const rawTasks = await window.firestoreManager.getTasks();
+                console.log('📊 Raw tasks from database:', rawTasks);
+
+                // Check active tasks
+                const activeTasks = rawTasks.filter(task => task.status === 'active');
+                console.log('✅ Active tasks:', activeTasks);
+
+                // Check if tasks are being filtered out
+                const filteredOutTasks = rawTasks.filter(task => task.status !== 'active');
+                if (filteredOutTasks.length > 0) {
+                    console.log('❌ Tasks filtered out due to status:', filteredOutTasks);
+                }
+
+                // Check deadline filtering
+                const deadlineFilteredTasks = [];
+                for (const task of activeTasks) {
+                    if (task.task_deadline_hours) {
+                        const taskCreatedAt = task.created_at?.toDate ? task.created_at.toDate() : new Date(task.created_at);
+                        const deadlineTime = new Date(taskCreatedAt.getTime() + (task.task_deadline_hours * 60 * 60 * 1000));
+                        const now = new Date();
+
+                        if (now > deadlineTime) {
+                            deadlineFilteredTasks.push({
+                                task: task.title,
+                                deadline: deadlineTime.toISOString(),
+                                now: now.toISOString()
+                            });
+                        }
+                    }
+                }
+
+                if (deadlineFilteredTasks.length > 0) {
+                    console.log('⏰ Tasks filtered out due to deadline:', deadlineFilteredTasks);
+                }
+
+                // Check if renderTasks is being called
+                console.log('🔍 Checking if renderTasks was called...');
+
+                return {
+                    tasksGridExists: !!tasksGrid,
+                    tasksGridContent: tasksGrid.innerHTML,
+                    rawTasks,
+                    activeTasks,
+                    filteredOutTasks,
+                    deadlineFilteredTasks
+                };
+            } catch (error) {
+                console.error('❌ Error debugging rendering process:', error);
+                return null;
+            }
+        };
+
+        // Add function to force render all tasks (bypass filters)
+        window.forceRenderAllTasks = async () => {
+            console.log('🚀 FORCE RENDERING ALL TASKS (bypassing filters)...');
+            try {
+                // Get all tasks including inactive ones
+                const allTasks = await window.firestoreManager.getAllTasks();
+                console.log('📊 All tasks (including inactive):', allTasks);
+
+                // Force render them
+                await this.renderTasks(allTasks);
+                console.log('✅ Force rendered all tasks');
+
+                this.showToast('Force rendered all tasks (including inactive)', 'info');
+                return allTasks;
+            } catch (error) {
+                console.error('❌ Error force rendering tasks:', error);
+                this.showToast('Failed to force render tasks: ' + error.message, 'error');
+                return null;
+            }
+        };
+
         // Add function to manually refresh countdown displays
         window.refreshCountdowns = async () => {
             console.log('🔄 Refreshing countdown displays...');
@@ -1285,21 +2608,21 @@ class DashboardHandler {
         };
 
         // Add function to debug completion counts
-        window.debugCompletionCounts = async () => {
-            console.log('🏆 Debugging completion counts...');
+        window.debugTaskStatuses = async () => {
+            console.log('🏆 Debugging task statuses...');
             try {
                 const tasks = await window.firestoreManager.getTasks();
                 for (const task of tasks) {
-                    const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, task.id);
+                    const status = await this.getUserTaskStatus(task.id);
                     console.log(`Task: ${task.title}`, {
                         id: task.id,
-                        completionCount: completionCount,
-                        maxCompletions: task.maxCompletions || 1,
-                        display: `${completionCount}/${task.maxCompletions || 1}`
+                        status: status.status,
+                        restart_count: status.restart_count || 0,
+                        completionCount: status.completionCount || 0
                     });
                 }
             } catch (error) {
-                console.error('Error debugging completion counts:', error);
+                console.error('Error debugging task statuses:', error);
             }
         };
 
@@ -1397,27 +2720,137 @@ class DashboardHandler {
             }
         };
 
+        // Add function to completely reset and start again an expired task
+        window.startAgainTask = async (taskId) => {
+            try {
+                console.log(`🔄 COMPLETE TASK RESET CALLED: ${taskId}`);
+                console.log('🔍 Current user:', window.authManager?.getCurrentUser());
+
+                const currentUser = window.authManager?.getCurrentUser();
+                if (!currentUser) {
+                    console.error('❌ No current user found');
+                    return;
+                }
+
+                // Step 1: Clear ALL localStorage data for this task
+                const userId = currentUser.uid;
+                const keysToRemove = [
+                    `task_start_${taskId}_${userId}`,
+                    `task_expired_${taskId}_${userId}`,
+                    `task_completed_${taskId}_${userId}`,
+                    `task_progress_${taskId}_${userId}`,
+                    `task_verification_${taskId}_${userId}`,
+                    `task_submission_${taskId}_${userId}`
+                ];
+
+                console.log('🧹 Clearing localStorage keys:', keysToRemove);
+                keysToRemove.forEach(key => {
+                    if (localStorage.getItem(key)) {
+                        localStorage.removeItem(key);
+                        console.log(`✅ Removed: ${key}`);
+                    }
+                });
+
+                // Step 2: Clear ALL task-related data from Firestore
+                console.log('🧹 Clearing Firestore data...');
+
+                // Clear any existing verifications first
+                const verifications = await window.firestoreManager.getVerificationsByUser(userId);
+                const taskVerifications = verifications.filter(v => v.taskId === taskId);
+                console.log(`🧹 Found ${taskVerifications.length} verifications to clear`);
+
+                for (const verification of taskVerifications) {
+                    await window.firestoreManager.deleteVerification(verification.id);
+                    console.log(`✅ Deleted verification: ${verification.id}`);
+                }
+
+                // Clear any existing task submissions - this will make the task available again
+                const submissions = await window.firestoreManager.getTaskSubmissions('all');
+                const userSubmissions = submissions.filter(s => s.task_id === taskId && s.user_id === userId);
+                console.log(`🧹 Found ${userSubmissions.length} task submissions to clear`);
+
+                for (const submission of userSubmissions) {
+                    await window.firestoreManager.deleteTaskSubmission(submission.id);
+                    console.log(`✅ Deleted task submission: ${submission.id}`);
+                }
+
+                // Step 3: Clear all timers and UI state
+                console.log('🧹 Clearing timers...');
+                if (window.dashboardHandler.countdownTimers) {
+                    window.dashboardHandler.countdownTimers.forEach(timer => clearInterval(timer));
+                    window.dashboardHandler.countdownTimers = [];
+                }
+
+                if (window.dashboardHandler.remainingTimeTimer) {
+                    clearInterval(window.dashboardHandler.remainingTimeTimer);
+                    window.dashboardHandler.remainingTimeTimer = null;
+                }
+
+                // Step 4: Force clear cache
+                if (window.dashboardHandler.clearCache) {
+                    window.dashboardHandler.clearCache();
+                    console.log('✅ Cleared dashboard cache');
+                }
+
+                // Step 5: Force refresh everything
+                console.log('🔄 Force refreshing tasks...');
+                await window.dashboardHandler.loadTasks(true); // Force refresh
+
+                // Step 6: Restart timers after a delay
+                setTimeout(() => {
+                    if (window.dashboardHandler.startCountdownTimers) {
+                        window.dashboardHandler.startCountdownTimers();
+                    }
+                    console.log('✅ Timers restarted');
+                }, 500);
+
+                console.log('✅ COMPLETE TASK RESET SUCCESSFUL');
+                window.dashboardHandler.showToast('Task completely reset! Fresh start with clean state.', 'success');
+
+                // Close any open modals
+                if (window.dashboardHandler.closeTaskModal) {
+                    window.dashboardHandler.closeTaskModal();
+                }
+
+            } catch (error) {
+                console.error('❌ Error in complete task reset:', error);
+                window.dashboardHandler.showToast('Error resetting task: ' + error.message, 'error');
+            }
+        };
+
         // Add function to restart a completed task
         window.restartTask = async (taskId) => {
             try {
-                console.log(`🔄 Restarting task: ${taskId}`);
+                console.log(`🔄 RESTART TASK CALLED: ${taskId}`);
+                console.log('🔍 Current user:', window.authManager?.getCurrentUser());
+                console.log('🔍 Dashboard handler:', window.dashboardHandler);
 
-                // Clear any existing task status - set to 'available' to allow restart
-                await window.firestoreManager.updateTaskStatus(taskId, 'available', this.currentUser.uid);
+                const currentUser = window.authManager?.getCurrentUser();
+                if (!currentUser) {
+                    console.error('❌ No current user found');
+                    return;
+                }
+
+                // Clear any existing task submissions to make task available again
+                const submissions = await window.firestoreManager.getTaskSubmissions('all');
+                const userSubmissions = submissions.filter(s => s.task_id === taskId && s.user_id === currentUser.uid);
+                for (const submission of userSubmissions) {
+                    await window.firestoreManager.deleteTaskSubmission(submission.id);
+                }
 
                 // Clear the start time from localStorage
                 window.clearTaskStartTime(taskId);
 
                 // Clear the expired flag
-                const expiredKey = `task_expired_${taskId}_${this.currentUser.uid}`;
+                const expiredKey = `task_expired_${taskId}_${currentUser.uid}`;
                 localStorage.removeItem(expiredKey);
 
                 // Clear any completion flags or progress data
-                const completionKey = `task_completed_${taskId}_${this.currentUser.uid}`;
+                const completionKey = `task_completed_${taskId}_${currentUser.uid}`;
                 localStorage.removeItem(completionKey);
 
                 // Clear any existing verifications for this task to start fresh
-                const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
+                const verifications = await window.firestoreManager.getVerificationsByUser(currentUser.uid);
                 const taskVerifications = verifications.filter(v => v.taskId === taskId);
 
                 for (const verification of taskVerifications) {
@@ -1425,31 +2858,34 @@ class DashboardHandler {
                 }
 
                 // Clear and restart all countdown timers to ensure fresh state
-                if (this.countdownTimers) {
-                    this.countdownTimers.forEach(timer => clearInterval(timer));
-                    this.countdownTimers = [];
+                if (window.dashboardHandler.countdownTimers) {
+                    window.dashboardHandler.countdownTimers.forEach(timer => clearInterval(timer));
+                    window.dashboardHandler.countdownTimers = [];
                 }
 
                 // Clear remaining time timer
-                if (this.remainingTimeTimer) {
-                    clearInterval(this.remainingTimeTimer);
-                    this.remainingTimeTimer = null;
+                if (window.dashboardHandler.remainingTimeTimer) {
+                    clearInterval(window.dashboardHandler.remainingTimeTimer);
+                    window.dashboardHandler.remainingTimeTimer = null;
                 }
 
                 console.log('✅ Task restarted successfully with clean timer state');
-                this.showToast('Task restarted! You can now begin again with a fresh timer.', 'success');
+                window.dashboardHandler.showToast('Task restarted! You can now begin again with a fresh timer.', 'success');
+
+                // Close the current modal
+                window.dashboardHandler.closeTaskModal();
 
                 // Refresh the tasks to show updated status and restart timers
-                await this.loadTasks();
+                await window.dashboardHandler.loadTasks();
 
                 // Restart timers after a short delay to ensure DOM is ready
                 setTimeout(() => {
-                    this.startCountdownTimers();
+                    window.dashboardHandler.startCountdownTimers();
                 }, 200);
 
             } catch (error) {
                 console.error('Error restarting task:', error);
-                this.showToast('Error restarting task. Please try again.', 'error');
+                window.dashboardHandler.showToast('Error restarting task. Please try again.', 'error');
             }
         };
 
@@ -1479,6 +2915,50 @@ class DashboardHandler {
             this.loadTasks();
         };
 
+        // Add function to completely clear all task data (for debugging)
+        window.clearAllTaskData = async (taskId) => {
+            try {
+                console.log(`🧹 CLEARING ALL DATA FOR TASK: ${taskId}`);
+
+                const currentUser = window.authManager?.getCurrentUser();
+                if (!currentUser) {
+                    console.error('❌ No current user found');
+                    return;
+                }
+
+                const userId = currentUser.uid;
+
+                // Clear all possible localStorage keys
+                const allKeys = Object.keys(localStorage);
+                const taskKeys = allKeys.filter(key => key.includes(taskId) && key.includes(userId));
+
+                console.log(`🧹 Found ${taskKeys.length} localStorage keys to clear:`, taskKeys);
+                taskKeys.forEach(key => {
+                    localStorage.removeItem(key);
+                    console.log(`✅ Removed: ${key}`);
+                });
+
+                // Clear Firestore data - delete task submissions to make task available
+                const submissions = await window.firestoreManager.getTaskSubmissions('all');
+                const userSubmissions = submissions.filter(s => s.task_id === taskId && s.user_id === userId);
+                for (const submission of userSubmissions) {
+                    await window.firestoreManager.deleteTaskSubmission(submission.id);
+                }
+                console.log('✅ Firestore submissions cleared');
+
+                // Force refresh
+                await this.loadTasks(true);
+                await this.renderTasks();
+
+                console.log('✅ ALL TASK DATA CLEARED');
+                this.showToast('All task data cleared!', 'success');
+
+            } catch (error) {
+                console.error('❌ Error clearing all task data:', error);
+                this.showToast('Error clearing task data: ' + error.message, 'error');
+            }
+        };
+
         // Add function to debug timer status
         window.debugTimerStatus = () => {
             console.log('🕐 Debugging timer status...');
@@ -1493,6 +2973,34 @@ class DashboardHandler {
                     hasStartTime: !!storedStartTime
                 });
             });
+        };
+
+        // Add function to test restart manually
+        window.testRestart = async (taskId) => {
+            console.log('🧪 Testing restart for task:', taskId);
+            try {
+                // Close any modals
+                const modals = document.querySelectorAll('.modal');
+                modals.forEach(modal => modal.remove());
+                console.log('✅ Closed all modals');
+
+                // Clear task submissions to make task available
+                const submissions = await window.firestoreManager.getTaskSubmissions('all');
+                const userSubmissions = submissions.filter(s => s.task_id === taskId && s.user_id === this.currentUser.uid);
+                for (const submission of userSubmissions) {
+                    await window.firestoreManager.deleteTaskSubmission(submission.id);
+                }
+                console.log('✅ Cleared task submissions to make available');
+
+                // Reload tasks
+                await this.loadTasks();
+                console.log('✅ Reloaded tasks');
+
+                this.showToast('Test restart completed!', 'success');
+            } catch (error) {
+                console.error('❌ Test restart failed:', error);
+                this.showToast('Test restart failed: ' + error.message, 'error');
+            }
         };
 
         // Add function to show admin view of user timers
@@ -1528,30 +3036,245 @@ class DashboardHandler {
 
     createTaskCard(task) {
         // Use the user status that was loaded
-        const taskStatus = task.userStatus || 'available';
+        const taskStatus = task.userStatus?.status || 'available';
 
         console.log('🎨 Creating task card for:', task.title, {
             userStatus: task.userStatus,
             userStatusObject: task.userStatusObject,
-            finalTaskStatus: taskStatus
+            finalTaskStatus: taskStatus,
+            statusFromUserStatus: task.userStatus?.status,
+            isObject: typeof task.userStatus,
+            hasStatus: 'status' in (task.userStatus || {})
         });
 
-        // Check if user time has expired
-        const expiredKey = `task_expired_${task.id}_${this.currentUser.uid}`;
-        const isUserTimeExpired = localStorage.getItem(expiredKey) === 'true';
+        // COMPLETELY RECREATED LOGIC - Task Status Priority
+        const now = new Date();
+        let finalStatus = taskStatus;
+        let isTaskEnded = false;
+        let isUserTimeExpired = false;
 
-        // Override status if user time expired
-        const finalStatus = isUserTimeExpired ? 'expired' : taskStatus;
+        // Step 1: Check if task deadline has passed (this should override everything else)
+        if (task.task_deadline_hours && task.created_at) {
+            let taskCreatedAt;
 
-        console.log('🎨 Final status for task card:', finalStatus);
+            // Parse created_at date with multiple fallbacks
+            try {
+                if (task.created_at.toDate && typeof task.created_at.toDate === 'function') {
+                    taskCreatedAt = task.created_at.toDate();
+                } else if (task.created_at.seconds) {
+                    taskCreatedAt = new Date(task.created_at.seconds * 1000);
+                } else if (task.created_at._seconds) {
+                    taskCreatedAt = new Date(task.created_at._seconds * 1000);
+                } else if (typeof task.created_at === 'string') {
+                    taskCreatedAt = new Date(task.created_at);
+                } else {
+                    taskCreatedAt = new Date(task.created_at);
+                }
+
+                if (!isNaN(taskCreatedAt.getTime())) {
+                    const taskDeadlineTime = new Date(taskCreatedAt.getTime() + (task.task_deadline_hours * 60 * 60 * 1000));
+                    isTaskEnded = now > taskDeadlineTime;
+
+                    console.log('🎯 TASK DEADLINE CHECK:', {
+                        taskId: task.id,
+                        title: task.title,
+                        created_at: taskCreatedAt.toISOString(),
+                        deadline_hours: task.task_deadline_hours,
+                        calculated_deadline: taskDeadlineTime.toISOString(),
+                        current_time: now.toISOString(),
+                        is_task_ended: isTaskEnded,
+                        hours_since_creation: (now.getTime() - taskCreatedAt.getTime()) / (1000 * 60 * 60),
+                        hours_until_deadline: (taskDeadlineTime.getTime() - now.getTime()) / (1000 * 60 * 60)
+                    });
+
+                    // FORCE ENDED STATUS if deadline has passed - this should override everything
+                    if (isTaskEnded) {
+                        console.log('🚨 FORCING TASK TO ENDED - Deadline has passed!');
+                        finalStatus = 'ended';
+                        isUserTimeExpired = false; // Override user time expired
+                    }
+                } else {
+                    console.error('❌ Invalid created_at date for task:', task.id, task.created_at);
+                }
+            } catch (error) {
+                console.error('❌ Error parsing created_at for task:', task.id, error);
+            }
+        }
+
+        // Step 2: Check if user time has expired (only if task hasn't ended)
+        if (!isTaskEnded) {
+            const expiredKey = `task_expired_${task.id}_${this.currentUser.uid}`;
+            isUserTimeExpired = localStorage.getItem(expiredKey) === 'true';
+
+            console.log('🔍 USER TIME EXPIRY CHECK:', {
+                taskId: task.id,
+                expiredKey: expiredKey,
+                localStorageValue: localStorage.getItem(expiredKey),
+                isUserTimeExpired: isUserTimeExpired
+            });
+
+            if (isUserTimeExpired) {
+                console.log('⏰ USER TIME EXPIRED for task:', task.id);
+            }
+        }
+
+        // Step 3: Apply priority logic (ended status should already be set above)
+        if (finalStatus === 'ended') {
+            console.log('✅ FINAL STATUS: ENDED (task deadline passed)');
+        } else if (isUserTimeExpired && !isTaskEnded) {
+            finalStatus = 'expired'; // User time limit exceeded - can restart
+            console.log('✅ FINAL STATUS: EXPIRED (user time limit exceeded)');
+        } else {
+            console.log('✅ FINAL STATUS: Using original status:', finalStatus);
+        }
+
+        // Step 4: Additional check - if task deadline display shows "Ended", force ended status
+        // This is a fallback for cases where the deadline calculation might not work properly
+        const taskDeadlineDisplay = this.calculateDeadlineDisplay(task.deadline);
+        if (taskDeadlineDisplay === 'Ended') {
+            console.log('🚨 FALLBACK: Task deadline display shows "Ended", forcing status to ended');
+            finalStatus = 'ended';
+            isTaskEnded = true;
+        }
+
+        // Step 5: Check if the task has a deadline timer that shows "Ended"
+        // This handles cases where the deadline timer is already showing "Ended"
+        if (task.deadline) {
+            try {
+                const deadlineDate = new Date(task.deadline);
+                if (!isNaN(deadlineDate.getTime()) && now > deadlineDate) {
+                    console.log('🚨 FALLBACK 2: Task deadline has passed, forcing status to ended');
+                    finalStatus = 'ended';
+                    isTaskEnded = true;
+                }
+            } catch (error) {
+                console.error('Error parsing task deadline:', error);
+            }
+        }
+
+        // Step 6: Direct check - if task has very short deadline and was created today, likely ended
+        // This is a more aggressive fallback for tasks that should be ended
+        if (task.task_deadline_hours <= 1 && task.created_at) {
+            try {
+                let taskCreatedAt;
+                if (task.created_at.toDate && typeof task.created_at.toDate === 'function') {
+                    taskCreatedAt = task.created_at.toDate();
+                } else if (task.created_at.seconds) {
+                    taskCreatedAt = new Date(task.created_at.seconds * 1000);
+                } else if (task.created_at._seconds) {
+                    taskCreatedAt = new Date(task.created_at._seconds * 1000);
+                } else if (typeof task.created_at === 'string') {
+                    taskCreatedAt = new Date(task.created_at);
+                } else {
+                    taskCreatedAt = new Date(task.created_at);
+                }
+
+                if (!isNaN(taskCreatedAt.getTime())) {
+                    const hoursSinceCreation = (now.getTime() - taskCreatedAt.getTime()) / (1000 * 60 * 60);
+                    if (hoursSinceCreation > task.task_deadline_hours) {
+                        console.log('🚨 FALLBACK 3: Task with short deadline created hours ago, forcing ended status');
+                        finalStatus = 'ended';
+                        isTaskEnded = true;
+                    }
+                }
+            } catch (error) {
+                console.error('Error in fallback 3:', error);
+            }
+        }
+
+        // Step 7: ULTIMATE FALLBACK - Force ended status for tasks that should be ended
+        // This is the most aggressive check - if we detect any signs the task should be ended, force it
+        if (finalStatus !== 'ended' && (task.task_deadline_hours <= 1 || taskDeadlineDisplay === 'Ended')) {
+            console.log('🚨 ULTIMATE FALLBACK: Forcing ended status based on deadline indicators');
+            finalStatus = 'ended';
+            isTaskEnded = true;
+        }
+
+        console.log('🎨 FINAL STATUS DECISION:', {
+            taskId: task.id,
+            taskTitle: task.title,
+            originalStatus: taskStatus,
+            isUserTimeExpired: isUserTimeExpired,
+            isTaskEnded: isTaskEnded,
+            finalStatus: finalStatus,
+            taskDeadline: task.deadline,
+            taskDeadlineHours: task.task_deadline_hours,
+            taskCreatedAt: task.created_at,
+            currentTime: now.toISOString(),
+            willAddEndedClass: finalStatus === 'ended' || finalStatus === 'expired'
+        });
+
+        console.log('🔍 RIGHT BEFORE TEMPLATE GENERATION:', {
+            taskId: task.id,
+            finalStatus: finalStatus,
+            statusConfig: this.getTaskStatusConfig(finalStatus, task.deadline),
+            willAddEndedClass: finalStatus === 'ended' || finalStatus === 'expired'
+        });
 
         const statusConfig = this.getTaskStatusConfig(finalStatus, task.deadline);
+
+        // Determine task card class based on status
+        let taskCardClass = 'task-card';
+        if (finalStatus === 'rejected' || finalStatus === 'rejected_resubmission') {
+            taskCardClass += ' rejected-task';
+        } else if (finalStatus === 'approved') {
+            taskCardClass += ' approved-task';
+        } else if (finalStatus === 'completed') {
+            taskCardClass += ' completed-task';
+        } else if (finalStatus === 'ended') {
+            taskCardClass += ' ended-task';
+        } else if (finalStatus === 'expired') {
+            taskCardClass += ' expired-task';
+        } else if (finalStatus === 'pending' || finalStatus === 'pending_review') {
+            taskCardClass += ' pending-task';
+        } else if (finalStatus === 'available') {
+            taskCardClass += ' available-task';
+        } else if (finalStatus === 'in_progress') {
+            taskCardClass += ' in-progress-task';
+        }
+
+        // Add ended-task class only for truly ended tasks, not expired ones
+        if (finalStatus === 'ended') {
+            taskCardClass += ' ended-task-modern';
+        } else if (finalStatus === 'expired') {
+            taskCardClass += ' expired-task-modern'; // Different class for expired tasks
+        }
 
         // Get difficulty display
         const difficultyStars = this.getDifficultyStars(task.difficulty);
 
         // Get task deadline display (for badge - shows task availability)
-        const taskDeadlineText = task.deadline ? this.calculateDeadlineDisplay(task.deadline) : 'No Deadline';
+        let taskDeadlineText = 'No Deadline';
+        let taskDeadline = null;
+        let taskDeadlineTime = null;
+
+        if (task.task_deadline_hours && task.created_at) {
+            let taskCreatedAt;
+            try {
+                if (task.created_at.toDate && typeof task.created_at.toDate === 'function') {
+                    taskCreatedAt = task.created_at.toDate();
+                } else if (task.created_at.seconds) {
+                    taskCreatedAt = new Date(task.created_at.seconds * 1000);
+                } else if (task.created_at._seconds) {
+                    taskCreatedAt = new Date(task.created_at._seconds * 1000);
+                } else if (typeof task.created_at === 'string') {
+                    taskCreatedAt = new Date(task.created_at);
+                } else {
+                    taskCreatedAt = new Date(task.created_at);
+                }
+
+                if (!isNaN(taskCreatedAt.getTime())) {
+                    taskDeadlineTime = new Date(taskCreatedAt.getTime() + (task.task_deadline_hours * 60 * 60 * 1000));
+                    taskDeadline = taskDeadlineTime; // Use the calculated deadline
+                    taskDeadlineText = this.calculateDeadlineDisplay(taskDeadlineTime);
+                }
+            } catch (error) {
+                console.error('Error calculating task deadline display:', error);
+            }
+        } else if (task.deadline || task.task_deadline) {
+            taskDeadline = task.deadline || task.task_deadline;
+            taskDeadlineText = this.calculateDeadlineDisplay(taskDeadline);
+        }
 
         // Get user time display (for duration section - shows user completion time)
         let userTimeText = this.calculateUserTimeDisplay(task);
@@ -1561,20 +3284,37 @@ class DashboardHandler {
             userTimeText = 'Expired';
         }
 
-        // Get completion count display
-        const completionCount = task.completionCount || 0;
-        const maxCompletions = task.maxCompletions || 1;
+        // Get completion count display - use from user status if available
+        const completionCount = task.userStatus?.completionCount || 0;
+        const maxCompletions = task.max_restarts ? task.max_restarts + 1 : 1;
         // Show completion count in X/Y format
         const completionText = `${completionCount}/${maxCompletions}`;
 
+        console.log(`🎯 Task ${task.title} completion count:`, {
+            userStatus: task.userStatus,
+            completionCount: completionCount,
+            maxCompletions: maxCompletions,
+            completionText: completionText
+        });
+
+        console.log('🚀 FINAL TEMPLATE VARIABLES:', {
+            taskId: task.id,
+            finalStatus: finalStatus,
+            taskCardClass: taskCardClass,
+            statusConfigClass: statusConfig.class,
+            endedTaskClass: finalStatus === 'ended' ? 'ended-task' : '',
+            expiredTaskClass: finalStatus === 'expired' ? 'expired-task' : '',
+            onclickAttr: finalStatus === 'ended' ? '' : `onclick="window.dashboardHandler.openTaskDetail('${task.id}', this)"`
+        });
+
         return `
-            <div class="task-card-modern ${statusConfig.class}" onclick="window.dashboardHandler.openTaskDetail('${task.id}')">
+            <div class="task-card-modern ${taskCardClass} ${statusConfig.class} ${finalStatus === 'ended' ? 'ended-task' : ''} ${finalStatus === 'expired' ? 'expired-task' : ''}" ${finalStatus === 'ended' ? '' : `onclick="console.log('🔄 TASK CARD CLICKED:', '${task.id}', '${finalStatus}'); if(window.dashboardHandler && window.dashboardHandler.openTaskDetail) { window.dashboardHandler.openTaskDetail('${task.id}', this); } else { console.error('❌ Dashboard handler not available'); }"`}>
                 <div class="task-card-header">
-                    ${task.banner ? `
-                        <img src="${task.banner}" alt="${task.title}" class="task-banner">
+                    ${(task.banner || task.background_image) ? `
+                        <img src="${task.banner || task.background_image}" alt="${task.title || 'Task'}" class="task-banner">
                     ` : `
                         <div class="task-hexagon-icon">
-                            ${task.title.charAt(0).toUpperCase()}
+                            ${(task.title || 'T').charAt(0).toUpperCase()}
                         </div>
                     `}
                     <div class="task-status-overlay">
@@ -1582,8 +3322,8 @@ class DashboardHandler {
                             ${statusConfig.icon} ${statusConfig.label}
                         </span>
                     </div>
-                    ${task.deadline ? `
-                        <div class="task-deadline-timer" data-deadline="${this.formatDeadlineForTimer(task.deadline)}">
+                    ${taskDeadline ? `
+                        <div class="task-deadline-timer" data-deadline="${this.formatDeadlineForTimer(taskDeadline)}">
                             <i class="fas fa-clock"></i>
                             <span class="deadline-text" data-task-id="${task.id}">${taskDeadlineText}</span>
                         </div>
@@ -1607,7 +3347,7 @@ class DashboardHandler {
                 </div>
                 <div class="task-card-content">
                     <div class="task-title-section">
-                        <h3 class="task-title">${task.title}</h3>
+                        <h3 class="task-title">${task.title || 'Untitled Task'}</h3>
                         ${task.description ? `
                             <p class="task-description">${task.description}</p>
                         ` : ''}
@@ -1626,6 +3366,22 @@ class DashboardHandler {
                             <span class="completion-text">${completionText}</span>
                         </div>
                     </div>
+                    ${task.task_deadline_hours || task.user_time_limit_hours ? `
+                        <div class="task-time-info">
+                            ${task.task_deadline_hours ? `
+                                <div class="task-deadline-info">
+                                    <i class="fas fa-calendar-alt"></i>
+                                    <span>Task Deadline: ${task.task_deadline_hours}h</span>
+                                </div>
+                            ` : ''}
+                            ${task.user_time_limit_hours ? `
+                                <div class="task-user-limit-info">
+                                    <i class="fas fa-user-clock"></i>
+                                    <span>Your Time Limit: ${task.user_time_limit_hours}h</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
                     <div class="task-details-section">
                         <div class="task-detail-item">
                             <span class="detail-label">Max Completions:</span>
@@ -1637,16 +3393,24 @@ class DashboardHandler {
                         </div>
                         <div class="task-detail-item">
                             <span class="detail-label">Created:</span>
-                            <span class="detail-value">${task.createdAt ? new Date(task.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}</span>
+                            <span class="detail-value">${this.formatCreatedDate(task)}</span>
                         </div>
                     </div>
                     <div class="task-action-section">
                         ${finalStatus === 'expired' ? `
-                            <button class="task-action-btn ${statusConfig.buttonClass}" onclick="event.stopPropagation(); window.restartTask('${task.id}')">
+                            <button class="task-action-btn ${statusConfig.buttonClass}" onclick="event.stopPropagation(); console.log('🔄 START AGAIN BUTTON CLICKED:', '${task.id}'); window.startAgainTask('${task.id}')">
+                                ${statusConfig.buttonText}
+                            </button>
+                        ` : finalStatus === 'ended' ? `
+                            <button class="task-action-btn ${statusConfig.buttonClass}" disabled style="opacity: 0.6; cursor: not-allowed;">
+                                ${statusConfig.buttonText}
+                            </button>
+                        ` : finalStatus === 'completed' || finalStatus === 'approved' ? `
+                            <button class="task-action-btn ${statusConfig.buttonClass}" onclick="event.stopPropagation(); window.dashboardHandler.openTaskDetail('${task.id}', event.target.closest('.task-card-modern'))">
                                 ${statusConfig.buttonText}
                             </button>
                         ` : `
-                            <button class="task-action-btn ${statusConfig.buttonClass}" onclick="event.stopPropagation(); window.dashboardHandler.openTaskDetail('${task.id}')" ${taskStatus === 'disabled' ? 'disabled' : ''}>
+                            <button class="task-action-btn ${statusConfig.buttonClass}" onclick="event.stopPropagation(); window.dashboardHandler.openTaskDetail('${task.id}', event.target.closest('.task-card-modern'))" ${taskStatus === 'disabled' ? 'disabled' : ''}>
                                 ${statusConfig.buttonText}
                             </button>
                         `}
@@ -1676,16 +3440,16 @@ class DashboardHandler {
             if (taskStatus && taskStatus.status && taskStatus.status !== 'available') {
                 console.log(`✅ Using taskStatuses status for ${task.title}:`, taskStatus.status);
                 console.log(`🔍 Full taskStatus object:`, taskStatus);
-                return taskStatus.status;
+                return taskStatus; // Return the full object, not just the status
             }
 
             // If we reach here, it means no task status document exists
             // This should only happen for completely new users
             console.log(`📝 New user detected for ${task.title} - no task status document exists`);
-            return 'available';
+            return { status: 'available', restart_count: 0 };
         } catch (error) {
             console.error('Error getting user task status:', error);
-            return 'available';
+            return { status: 'available', restart_count: 0 };
         }
     }
 
@@ -1710,11 +3474,11 @@ class DashboardHandler {
             const now = new Date();
             if (now > deadlineDate) {
                 return {
-                    class: 'expired',
-                    badgeClass: 'status-expired',
+                    class: 'ended',
+                    badgeClass: 'status-ended',
                     icon: '<i class="fas fa-clock"></i>',
-                    label: 'Expired',
-                    buttonText: 'Expired',
+                    label: 'Ended',
+                    buttonText: 'Task Ended',
                     buttonClass: 'btn-disabled'
                 };
             }
@@ -1748,6 +3512,15 @@ class DashboardHandler {
                     buttonText: 'Start Task',
                     buttonClass: 'btn-primary'
                 };
+            case 'in_progress':
+                return {
+                    class: 'in-progress',
+                    badgeClass: 'status-in-progress',
+                    icon: '<i class="fas fa-play"></i>',
+                    label: 'In Progress',
+                    buttonText: 'Complete Task',
+                    buttonClass: 'btn-success'
+                };
             case 'unlocked':
                 return {
                     class: 'unlocked',
@@ -1756,6 +3529,15 @@ class DashboardHandler {
                     label: 'In Progress',
                     buttonText: 'Continue Task',
                     buttonClass: 'btn-success'
+                };
+            case 'dns_setup':
+                return {
+                    class: 'dns-setup',
+                    badgeClass: 'status-dns-setup',
+                    icon: '<i class="fas fa-cog"></i>',
+                    label: 'DNS Setup',
+                    buttonText: 'Continue Setup',
+                    buttonClass: 'btn-primary'
                 };
             case 'ready_for_phase2':
                 return {
@@ -1785,6 +3567,7 @@ class DashboardHandler {
                     buttonClass: 'btn-warning'
                 };
             case 'pending':
+            case 'pending_review':
                 return {
                     class: 'pending',
                     badgeClass: 'status-pending',
@@ -1803,13 +3586,23 @@ class DashboardHandler {
                     buttonClass: 'btn-success'
                 };
             case 'completed':
+            case 'approved':
                 return {
                     class: 'completed',
                     badgeClass: 'status-completed',
                     icon: '<i class="fas fa-trophy"></i>',
                     label: 'Completed',
-                    buttonText: 'Quest Finished',
-                    buttonClass: 'btn-disabled'
+                    buttonText: 'View Details',
+                    buttonClass: 'btn-success'
+                };
+            case 'ended':
+                return {
+                    class: 'ended',
+                    badgeClass: 'status-ended',
+                    icon: '<i class="fas fa-clock"></i>',
+                    label: 'Ended',
+                    buttonText: 'Task Ended',
+                    buttonClass: 'btn-secondary'
                 };
             case 'rejected':
                 return {
@@ -1841,9 +3634,22 @@ class DashboardHandler {
         }
     }
 
-    async openTaskDetail(taskId) {
+    async openTaskDetail(taskId, cardElement = null) {
         try {
             console.log('Opening task detail for:', taskId);
+
+            // Set card loading state
+            if (cardElement) {
+                this.setCardLoading(cardElement, true);
+
+                // Add timeout protection to prevent stuck loading state
+                setTimeout(() => {
+                    if (cardElement && cardElement.classList.contains('card-loading')) {
+                        console.warn('Task detail loading timeout - resetting card state');
+                        this.setCardLoading(cardElement, false);
+                    }
+                }, 10000); // 10 second timeout
+            }
 
             // Get task details
             const tasks = await window.firestoreManager.getTasks();
@@ -1863,6 +3669,11 @@ class DashboardHandler {
         } catch (error) {
             console.error('Error opening task detail:', error);
             this.showToast('Failed to load task details', 'error');
+        } finally {
+            // Reset card loading state
+            if (cardElement) {
+                this.setCardLoading(cardElement, false);
+            }
         }
     }
 
@@ -1870,22 +3681,8 @@ class DashboardHandler {
         try {
             console.log('🔍 Getting task status for user:', this.currentUser.uid, 'task:', taskId, 'forceRefresh:', forceRefresh);
 
-            // Check quest completion count and limits
-            const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, taskId);
+            // Get task details
             const task = await window.firestoreManager.getTask(taskId);
-            const maxCompletions = task?.maxCompletions || 1; // Default to 1 if not set
-
-            console.log(`📊 Quest completion count: ${completionCount}/${maxCompletions}`);
-
-            // If user has reached max completions, show as completed
-            if (completionCount >= maxCompletions) {
-                return {
-                    status: 'completed',
-                    phase: 'final',
-                    completionCount: completionCount,
-                    maxCompletions: maxCompletions
-                };
-            }
 
             // First check for custom task status (Firefox + LeechBlock setup, Immutable link, etc.)
             const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
@@ -1905,6 +3702,25 @@ class DashboardHandler {
                 }
             }
 
+            // Always calculate completion count from submissions, regardless of current status
+            // Get completion count from task submissions
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = submissions.filter(s =>
+                s.task_id === taskId && s.user_id === this.currentUser.uid
+            );
+
+            // Count completed/approved submissions (these represent actual completions)
+            const completionCount = userSubmissions.filter(s =>
+                s.status === 'completed' || s.status === 'approved'
+            ).length;
+
+            console.log(`📊 Completion count for ${taskId}:`, {
+                totalSubmissions: userSubmissions.length,
+                completedSubmissions: completionCount,
+                submissions: userSubmissions.map(s => ({ id: s.id, status: s.status, restart_count: s.restart_count }))
+            });
+            const maxCompletions = task.max_restarts ? task.max_restarts + 1 : 1;
+
             // If we have a task status document, use it (this is the source of truth)
             if (taskStatus.status && taskStatus.status !== 'available') {
                 console.log('✅ Using task status from taskStatuses:', taskStatus.status);
@@ -1914,6 +3730,7 @@ class DashboardHandler {
                     immutableLinkApproved: taskStatus.immutableLinkApproved,
                     immutableLink: taskStatus.immutableLink ? 'Present' : 'Missing'
                 });
+
                 return {
                     ...taskStatus,
                     completionCount: completionCount,
@@ -1924,10 +3741,20 @@ class DashboardHandler {
             // If we reach here, it means no task status document exists
             // This should only happen for completely new users
             console.log('📝 New user detected - no task status document exists');
-            return { status: 'available', phase: null };
+            return {
+                status: 'available',
+                phase: null,
+                completionCount: completionCount,
+                maxCompletions: maxCompletions
+            };
         } catch (error) {
             console.error('Error getting user task status:', error);
-            return { status: 'available', phase: null };
+            return {
+                status: 'available',
+                phase: null,
+                completionCount: 0,
+                maxCompletions: 1
+            };
         }
     }
 
@@ -1961,7 +3788,7 @@ class DashboardHandler {
                                 <i class="fas fa-tasks text-blue-600 text-xl"></i>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <h3 class="modal-title text-xl font-semibold text-gray-900 mb-2">${task.title}</h3>
+                                <h3 class="modal-title text-xl font-semibold text-gray-900 mb-2">${task.title || 'Untitled Task'}</h3>
                                 <div class="flex items-center space-x-3">
                                     <span class="status-badge ${statusConfig.badgeClass}">
                                         ${statusConfig.icon} ${statusConfig.label}
@@ -1980,9 +3807,9 @@ class DashboardHandler {
                 </div>
 
                 <div class="modal-form">
-                    ${task.banner ? `
+                    ${(task.banner || task.background_image) ? `
                         <div class="mb-6">
-                            <img src="${task.banner}" alt="${task.title}" class="w-full h-48 object-cover rounded-lg">
+                            <img src="${task.banner || task.background_image}" alt="${task.title || 'Task'}" class="w-full h-48 object-cover rounded-lg">
                         </div>
                     ` : ''}
 
@@ -2017,6 +3844,22 @@ class DashboardHandler {
                                 <h4 class="form-label">Phase 2 Requirements</h4>
                                 <div class="bg-green-50 border border-green-200 rounded-lg p-4" style="overflow-x: hidden; word-wrap: break-word;">
                                     <div class="text-sm text-gray-700" style="white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">${task.phase2Requirements}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        ${task.requires_referrer_email ? `
+                            <div class="form-group">
+                                <div class="referrer-warning-box">
+                                    <div class="referrer-warning-header">
+                                        <div class="referrer-warning-icon">
+                                            <i class="fas fa-exclamation-triangle"></i>
+                                        </div>
+                                        <div class="referrer-warning-title">
+                                            <h4>Referrer Email Required</h4>
+                                            <p>${task.referrer_warning_message || 'Please contact your referrer for email provided'}</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ` : ''}
@@ -2067,12 +3910,28 @@ class DashboardHandler {
                 return '';
             })()}
                             ${taskStatus.status === 'available' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                ${task.requires_referrer_email ? `
+                                    <div class="mb-4">
+                                        <label class="form-label">
+                                            <i class="fas fa-envelope"></i>
+                                            Referrer Email (Required)
+                                        </label>
+                                        <input type="email" id="referrer-email-${task.id}" class="form-input" 
+                                               placeholder="Enter referrer email address" required>
+                                        <small class="form-help">This task requires a referrer email to proceed</small>
+                                    </div>
+                                ` : ''}
+                                <button onclick="window.dashboardHandler.startTask('${task.id}', this)" class="btn btn-primary w-full">
                                     <i class="fas fa-play mr-2"></i>
                                     Start Task
                                 </button>
+                            ` : taskStatus.status === 'in_progress' ? `
+                                <button onclick="window.dashboardHandler.showTaskCompletionForm('${task.id}', this)" class="btn btn-success w-full">
+                                    <i class="fas fa-check mr-2"></i>
+                                    Complete Task
+                                </button>
                             ` : taskStatus.status === 'unlocked' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                <button onclick="window.dashboardHandler.startTask('${task.id}', this)" class="btn btn-primary w-full">
                                     <i class="fas fa-arrow-right mr-2"></i>
                                     Continue Task
                                 </button>
@@ -2085,43 +3944,32 @@ class DashboardHandler {
                                     <p class="text-sm text-yellow-700 mb-3">Your submission is currently being reviewed by our admin team. Please wait for approval.</p>
                                 </div>
                             ` : taskStatus.status === 'dns_setup' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                <button onclick="window.dashboardHandler.startTask('${task.id}', this)" class="btn btn-primary w-full">
                                     <i class="fas fa-arrow-right mr-2"></i>
                                     Continue Task
                                 </button>
                             ` : taskStatus.status === 'ready_for_phase2' ? `
-                                <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn btn-primary w-full">
+                                <button onclick="window.dashboardHandler.startTask('${task.id}', this)" class="btn btn-primary w-full">
                                     <i class="fas fa-check-circle mr-2"></i>
                                     Start Phase 2
                                 </button>
                             ` : taskStatus.status === 'complete' ? `
-                                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                                    <div class="flex items-center mb-2">
-                                        <i class="fas fa-check-circle text-green-500 mr-2"></i>
-                                        <h5 class="font-medium text-green-800">Quest Completed!</h5>
-                                    </div>
-                                    <p class="text-sm text-green-700 mb-3">Congratulations! You have successfully completed this quest and earned ₱${task.reward}.</p>
+                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                                     <div class="flex items-center justify-between">
-                                        <div class="text-sm text-green-600">
+                                        <div class="text-sm text-blue-600">
                                             <span class="font-medium">Completions:</span> ${taskStatus.completionCount || 0}/${taskStatus.maxCompletions || 1}
                                         </div>
-                                        <button onclick="window.dashboardHandler.restartQuest('${task.id}')" class="btn btn-success">
+                                        <button onclick="window.dashboardHandler.restartQuest('${task.id}', this)" class="btn btn-primary">
                                             <i class="fas fa-redo mr-2"></i>
                                             Restart Quest
                                         </button>
                                     </div>
                                 </div>
-                            ` : taskStatus.status === 'completed' ? `
-                                <div class="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-                                    <div class="flex items-center mb-2">
-                                        <i class="fas fa-trophy text-purple-500 mr-2"></i>
-                                        <h5 class="font-medium text-purple-800">Quest Finished</h5>
-                                    </div>
-                                    <p class="text-sm text-purple-700 mb-3">You have reached the maximum number of completions for this quest (${taskStatus.maxCompletions || 1}).</p>
-                                    <div class="text-sm text-purple-600">
-                                        <span class="font-medium">Total Completions:</span> ${taskStatus.completionCount || 0}/${taskStatus.maxCompletions || 1}
-                                    </div>
-                                </div>
+                            ` : taskStatus.status === 'completed' || taskStatus.status === 'approved' ? `
+                                <button onclick="window.dashboardHandler.startTask('${task.id}', this)" class="btn btn-success w-full">
+                                    <i class="fas fa-redo mr-2"></i>
+                                    Restart Task
+                                </button>
                             ` : taskStatus.status === 'rejected' ? `
                                 <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
                                     <div class="flex items-center mb-2">
@@ -2129,7 +3977,7 @@ class DashboardHandler {
                                         <h5 class="font-medium text-red-800">Application Rejected</h5>
                                     </div>
                                     <p class="text-sm text-red-700 mb-3">Your initial application was rejected. Please review the requirements and resubmit your application.</p>
-                                    <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-warning">
+                                    <button onclick="window.dashboardHandler.resubmitTask('${task.id}', this)" class="btn-warning">
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
                                             <polyline points="16,6 12,2 8,6"></polyline>
@@ -2145,7 +3993,7 @@ class DashboardHandler {
                                         <h5 class="font-medium text-red-800">Final Verification Rejected</h5>
                                     </div>
                                     <p class="text-sm text-red-700 mb-3">Your final verification was rejected. Please review the requirements and resubmit your final verification.</p>
-                                    <button onclick="window.dashboardHandler.startTask('${task.id}')" class="btn-warning">
+                                    <button onclick="window.dashboardHandler.resubmitTask('${task.id}', this)" class="btn-warning">
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
                                             <polyline points="16,6 12,2 8,6"></polyline>
@@ -2172,9 +4020,14 @@ class DashboardHandler {
         });
     }
 
-    async startTask(taskId) {
-        try {
+    async startTask(taskId, button = null) {
+        return await window.loadingManager.withDatabaseLoading(async () => {
             console.log('Starting task:', taskId);
+
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Starting Task...');
+            }
 
             // Get task details
             const tasks = await window.firestoreManager.getTasks();
@@ -2188,13 +4041,82 @@ class DashboardHandler {
             console.log('Found task:', task);
             console.log('Task ID:', task.id);
 
-            // Check completion limits before allowing user to start
-            const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, taskId);
-            const maxCompletions = task?.maxCompletions || 1;
+            // Check if task is available to start
+            const status = await this.getUserTaskStatus(task.id);
+            console.log('🔍 Task status check:', status);
 
-            if (completionCount >= maxCompletions) {
-                this.showToast(`You have reached the maximum completions (${maxCompletions}) for this quest.`, 'error');
+            if (status.status === 'pending' || status.status === 'pending_review') {
+                this.showToast('Your submission is under review. Please wait for admin approval.', 'info');
                 return;
+            } else if (status.status === 'completed' || status.status === 'approved') {
+                // Task completed - check if user can restart
+                console.log('🎯 Task completed, checking restart options');
+                await this.showTaskRestartOptions(task, status);
+                return;
+            } else if (status.status === 'rejected') {
+                // Task rejected - show resubmit option
+                console.log('🎯 Task was rejected, showing resubmit option');
+                await this.showTaskRestartOptions(task, status);
+                return;
+            } else if (status.status !== 'available' && status.status !== 'in_progress') {
+                this.showToast('This task is not available to start.', 'error');
+                return;
+            }
+
+            // Check if referrer email is required and capture it
+            let referrerEmail = null;
+            if (task.requires_referrer_email) {
+                let referrerElement = document.getElementById(`referrer-email-${task.id}`);
+                referrerEmail = referrerElement ? referrerElement.value.trim() : null;
+
+                // Fallback: if specific element not found, try to find any referrer email input
+                if (!referrerElement || !referrerEmail) {
+                    console.log('🔍 Primary referrer element not found, trying fallback...');
+                    const allReferrerInputs = document.querySelectorAll('input[id*="referrer-email"]');
+                    console.log('Found referrer inputs:', allReferrerInputs.length);
+
+                    for (let input of allReferrerInputs) {
+                        if (input.value && input.value.trim()) {
+                            referrerElement = input;
+                            referrerEmail = input.value.trim();
+                            console.log('Using fallback referrer input:', input.id, input.value);
+                            break;
+                        }
+                    }
+                }
+
+                console.log('📧 Referrer email validation (startTask):', {
+                    requiresReferrer: task.requires_referrer_email,
+                    taskId: task.id,
+                    elementId: `referrer-email-${task.id}`,
+                    elementExists: !!referrerElement,
+                    elementValue: referrerElement ? referrerElement.value : 'Element not found',
+                    trimmedValue: referrerEmail,
+                    allReferrerInputs: document.querySelectorAll('input[id*="referrer-email"]').length,
+                    allInputs: document.querySelectorAll('input[type="email"]').length
+                });
+
+                if (!referrerEmail) {
+                    this.showToast('Referrer email is required for this task. Please enter a valid email address.', 'error');
+                    // Focus on the referrer email input if it exists
+                    if (referrerElement) {
+                        referrerElement.focus();
+                    } else {
+                        // Try to focus on any referrer email input
+                        const fallbackInput = document.querySelector('input[id*="referrer-email"]');
+                        if (fallbackInput) {
+                            fallbackInput.focus();
+                        }
+                    }
+                    return;
+                }
+
+                // Basic email validation
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(referrerEmail)) {
+                    this.showToast('Please enter a valid email address for the referrer.', 'error');
+                    return;
+                }
             }
 
             // Close any existing modals
@@ -2209,44 +4131,26 @@ class DashboardHandler {
             console.log('📊 Current task status:', taskStatus);
 
             if (taskStatus.status === 'available') {
-                // Show Phase 1 verification modal (Android version will be captured here)
-                console.log('🎯 Status is available, showing Phase 1 modal');
-                this.showPhase1VerificationModal(task);
-            } else if (taskStatus.status === 'unlocked') {
-                // Show Firefox + LeechBlock setup step before Phase 2
-                console.log('🎯 Status is unlocked, showing Firefox + LeechBlock setup modal');
-                console.log('⚠️ This should not happen if immutable link is approved!');
-                this.showDNSSetupModal(task, taskId);
-            } else if (taskStatus.status === 'dns_setup') {
-                // Show Immutable link capture step
-                console.log('🎯 Status is dns_setup, showing Immutable link modal');
-                this.showImmutableLinkModal(task);
-            } else if (taskStatus.status === 'pending') {
+                // Start the task - change status to in_progress
+                console.log('🎯 Status is available, starting task');
+                await this.startTaskDirectly(task, referrerEmail);
+            } else if (taskStatus.status === 'in_progress') {
+                // Task is in progress - show simple message
+                console.log('🎯 Task is in progress');
+                this.showToast('Task is already in progress. Please complete it first.', 'info');
+            } else if (taskStatus.status === 'pending' || taskStatus.status === 'pending_review') {
                 // Show waiting message for admin review
                 this.showToast('Your submission is under review. Please wait for admin approval.', 'info');
                 return;
-            } else if (taskStatus.status === 'ready_for_phase2') {
-                // Show Phase 2 verification modal
-                console.log('🎯 Task status is ready_for_phase2, showing Phase 2 modal');
-                console.log('🔍 Task status details:', taskStatus);
-
-                // Double-check that immutable link is approved
-                if (taskStatus.immutableLinkApproved) {
-                    this.showPhase2VerificationModal(task);
-                } else {
-                    console.log('⚠️ Status is ready_for_phase2 but immutableLinkApproved is not true');
-                    this.showToast('Immutable link approval is still pending. Please wait for admin approval.', 'warning');
-                    return;
-                }
-            } else if (taskStatus.status === 'rejected_resubmission') {
-                // Show Phase 2 verification modal for resubmission
-                console.log('🎯 Task status is rejected_resubmission, showing Phase 2 modal for resubmission');
-                this.showPhase2VerificationModal(task);
-                this.showToast('Your final verification was rejected. Please resubmit with the correct information.', 'warning');
+            } else if (taskStatus.status === 'completed' || taskStatus.status === 'approved') {
+                // Task completed - check if user can restart
+                console.log('🎯 Task completed, checking restart options');
+                await this.showTaskRestartOptions(task, taskStatus);
+                return;
             } else if (taskStatus.status === 'rejected') {
-                // Show Phase 1 verification modal for resubmission
-                this.showPhase1VerificationModal(task);
-                this.showToast('Please resubmit your application with the required information.', 'info');
+                // Task rejected - show resubmit option
+                console.log('🎯 Task was rejected, showing resubmit option');
+                await this.showTaskRestartOptions(task, taskStatus);
             } else {
                 this.showToast('Task cannot be started at this time.', 'error');
                 return;
@@ -2255,10 +4159,12 @@ class DashboardHandler {
             // Reload tasks to update status
             await this.loadTasks();
 
-        } catch (error) {
-            console.error('Error starting task:', error);
-            this.showToast('Failed to start task: ' + error.message, 'error');
-        }
+        }, 'Starting Task', 'Please wait while we start your task...').finally(() => {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
+        });
     }
 
     showDNSSetupModal(task, taskId = null) {
@@ -2443,14 +4349,14 @@ class DashboardHandler {
                                     <div class="server-label">Immutable URL to Block:</div>
                                     <div class="server-address">
                                         <span id="dns-server-display">${immutableUrlToBlock}</span>
-                                        <button type="button" class="copy-btn" onclick="window.dashboardHandler.copyDNSServer('${immutableUrlToBlock}')">
+                                        <button type="button" class="copy-btn" onclick="window.dashboardHandler.copyDNSServer('${immutableUrlToBlock}', this)">
                                             <i class="fas fa-copy"></i>
-                                </button>
+                                        </button>
                             </div>
                         </div>
 
                                 <div class="verification-actions">
-                                    <button type="button" class="verify-btn" onclick="window.dashboardHandler.checkDNSConfiguration('${immutableUrlToBlock}')">
+                                    <button type="button" class="verify-btn" onclick="window.dashboardHandler.checkDNSConfiguration('${immutableUrlToBlock}', this)">
                                         <i class="fas fa-check-circle"></i>
                                 Verify Firefox + LeechBlock Setup
                             </button>
@@ -2511,8 +4417,13 @@ class DashboardHandler {
         }
     }
 
-    async copyDNSServer(dnsServer) {
+    async copyDNSServer(dnsServer, button = null) {
         try {
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Copying...');
+            }
+
             await navigator.clipboard.writeText(dnsServer);
             this.showToast('DNS server address copied to clipboard!', 'success');
         } catch (error) {
@@ -2524,12 +4435,22 @@ class DashboardHandler {
             document.execCommand('copy');
             document.body.removeChild(textArea);
             this.showToast('DNS server address copied to clipboard!', 'success');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
         }
     }
 
-    async checkDNSConfiguration(immutableUrl) {
+    async checkDNSConfiguration(immutableUrl, button = null) {
         const resultDiv = document.getElementById('dns-check-result');
         const proceedBtn = document.getElementById('proceed-btn');
+
+        // Set button loading state
+        if (button) {
+            this.setButtonLoading(button, true, 'Verifying...');
+        }
 
         if (!resultDiv || !proceedBtn) {
             console.error('LeechBlock check elements not found');
@@ -2582,6 +4503,11 @@ class DashboardHandler {
             proceedBtn.disabled = true;
             proceedBtn.classList.add('opacity-50', 'cursor-not-allowed');
             this.showToast('⚠️ Firefox + LeechBlock is not active', 'warning');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
         }
     }
 
@@ -3096,7 +5022,7 @@ class DashboardHandler {
                                 </div>
                                 
                                 <div class="verification-actions">
-                                    <button type="button" class="btn btn-secondary" onclick="window.dashboardHandler.nextStep(2)">
+                                    <button type="button" class="btn btn-secondary" onclick="window.dashboardHandler.nextStep(2, this)">
                                         <i class="fas fa-check"></i>
                                         I Already Have It
                                     </button>
@@ -3128,7 +5054,7 @@ class DashboardHandler {
                             
                             <div class="verification-box">
                                 <div class="verification-actions">
-                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(3)">
+                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(3, this)">
                                         <i class="fas fa-check"></i>
                                         I'm Signed In
                                     </button>
@@ -3184,7 +5110,7 @@ class DashboardHandler {
                             
                             <div class="verification-box">
                                 <div class="verification-actions">
-                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(4)">
+                                    <button type="button" class="btn btn-primary" onclick="window.dashboardHandler.nextStep(4, this)">
                                         <i class="fas fa-check"></i>
                                         I Found My Game ID
                                     </button>
@@ -3273,7 +5199,12 @@ class DashboardHandler {
         }
     }
 
-    nextStep(stepNumber) {
+    nextStep(stepNumber, button = null) {
+        // Set button loading state
+        if (button) {
+            this.setButtonLoading(button, true, 'Loading...');
+        }
+
         // Hide all content steps
         document.querySelectorAll('.dns-section').forEach(step => {
             step.style.display = 'none';
@@ -3300,6 +5231,13 @@ class DashboardHandler {
         const submitBtn = document.getElementById('submit-phase1-btn');
         if (submitBtn) {
             submitBtn.style.display = stepNumber === 4 ? 'block' : 'none';
+        }
+
+        // Reset button loading state after a short delay
+        if (button) {
+            setTimeout(() => {
+                this.setButtonLoading(button, false);
+            }, 300);
         }
     }
 
@@ -3335,9 +5273,9 @@ class DashboardHandler {
                 autoRejected: v.autoRejected
             })));
 
-            // Check completion count
-            const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, taskId);
-            console.log('🏆 Completion count:', completionCount);
+            // Get task status
+            const status = await this.getUserTaskStatus(task.id);
+            console.log('🏆 Task status:', status);
 
             // Get final status
             const finalStatus = await this.getUserTaskStatus(taskId);
@@ -3352,49 +5290,90 @@ class DashboardHandler {
     // Load completion statistics for user profile
     async loadCompletionStats() {
         try {
-            const stats = await window.firestoreManager.getUserCompletionStats(this.currentUser.uid);
+            // Get user's task submissions to calculate stats
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = submissions.filter(s => s.user_id === this.currentUser.uid);
+
+            // Calculate stats
+            const completedSubmissions = userSubmissions.filter(s => s.status === 'approved' || s.status === 'completed');
+            const totalCompletions = completedSubmissions.length;
+
+            // Calculate total earned from completed submissions
+            let totalRewardsEarned = 0;
+            for (const submission of completedSubmissions) {
+                if (submission.task?.reward) {
+                    totalRewardsEarned += parseFloat(submission.task.reward) || 0;
+                }
+            }
 
             // Update completion count
             const completionElement = document.getElementById('quest-completions');
             if (completionElement) {
-                completionElement.textContent = stats.totalCompletions;
+                completionElement.textContent = totalCompletions;
             }
 
             // Update total earned
             const earnedElement = document.getElementById('total-earned');
             if (earnedElement) {
-                earnedElement.textContent = `₱${stats.totalRewardsEarned}`;
+                earnedElement.textContent = `₱${totalRewardsEarned.toFixed(2)}`;
             }
 
-            console.log('Completion stats loaded:', stats);
+            console.log('Completion stats loaded:', { totalCompletions, totalRewardsEarned });
         } catch (error) {
             console.error('Error loading completion stats:', error);
+            // Set default values on error
+            const completionElement = document.getElementById('quest-completions');
+            if (completionElement) {
+                completionElement.textContent = '0';
+            }
+
+            const earnedElement = document.getElementById('total-earned');
+            if (earnedElement) {
+                earnedElement.textContent = '₱0';
+            }
         }
     }
 
     // Restart quest function
-    async restartQuest(taskId) {
+    async restartQuest(taskId, button = null) {
         try {
             console.log('🔄 Restarting quest:', taskId);
 
-            // Close the modal first
-            const modal = document.querySelector('.modal');
-            if (modal) {
-                modal.remove();
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Restarting...');
             }
 
-            // Check if user has reached completion limit
-            const completionCount = await window.firestoreManager.getUserQuestCompletionCount(this.currentUser.uid, taskId);
-            const task = await window.firestoreManager.getTask(taskId);
-            const maxCompletions = task?.maxCompletions || 1;
-
-            if (completionCount >= maxCompletions) {
-                this.showToast(`You have reached the maximum completions (${maxCompletions}) for this quest.`, 'error');
+            // Get task details first
+            const tasks = await window.firestoreManager.getTasks();
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) {
+                this.showToast('Task not found', 'error');
                 return;
             }
 
-            // Clear any existing task status - set to 'available' to allow restart
-            await window.firestoreManager.updateTaskStatus(taskId, 'available', this.currentUser.uid);
+            // Close the task detail modal specifically
+            const taskModal = document.getElementById('task-detail-modal');
+            console.log('🔍 Looking for task detail modal:', taskModal);
+            if (taskModal) {
+                taskModal.remove();
+                console.log('✅ Task detail modal closed');
+            } else {
+                console.log('❌ Task detail modal not found, trying to close any modal');
+                // Fallback: close any modal
+                const anyModal = document.querySelector('.modal');
+                if (anyModal) {
+                    anyModal.remove();
+                    console.log('✅ Closed fallback modal');
+                }
+            }
+
+            // Clear any existing task submissions to make task available again
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmissions = submissions.filter(s => s.task_id === taskId && s.user_id === this.currentUser.uid);
+            for (const submission of userSubmissions) {
+                await window.firestoreManager.deleteTaskSubmission(submission.id);
+            }
 
             // Clear stored start time from localStorage
             const startTimeKey = `task_start_${taskId}_${this.currentUser.uid}`;
@@ -3406,6 +5385,10 @@ class DashboardHandler {
             localStorage.removeItem(expiredKey);
             console.log(`🗑️ Cleared expired flag from localStorage: ${expiredKey}`);
 
+            // Clear any completion flags or progress data
+            const completionKey = `task_completed_${taskId}_${this.currentUser.uid}`;
+            localStorage.removeItem(completionKey);
+
             // Also clear any existing verifications for this task to start fresh
             const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
             const taskVerifications = verifications.filter(v => v.taskId === taskId);
@@ -3416,7 +5399,13 @@ class DashboardHandler {
                 console.log('🗑️ Deleted old verification:', verification.id);
             }
 
-            this.showToast(`Quest restarted! You can now begin again with fresh timer. (${completionCount}/${maxCompletions} completions)`, 'success');
+            // Clear and restart all countdown timers to ensure fresh state
+            if (this.countdownTimers) {
+                this.countdownTimers.forEach(timer => clearInterval(timer));
+                this.countdownTimers = [];
+            }
+
+            this.showToast(`Quest restarted! You can now begin again with fresh timer.`, 'success');
 
             // Reload tasks to update the UI
             await this.loadTasks();
@@ -3424,6 +5413,11 @@ class DashboardHandler {
         } catch (error) {
             console.error('❌ Error restarting quest:', error);
             this.showToast('Failed to restart quest: ' + error.message, 'error');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
         }
     }
 
@@ -3588,6 +5582,588 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         }
     }
 
+    async startTaskDirectly(task, passedReferrerEmail = null) {
+        try {
+            console.log('🚀 Starting task directly:', task.title);
+
+            // Get referrer email if required
+            let referrerEmail = passedReferrerEmail;
+            if (task.requires_referrer_email && !referrerEmail) {
+                let referrerElement = document.getElementById(`referrer-email-${task.id}`);
+                referrerEmail = referrerElement ? referrerElement.value.trim() : null;
+
+                // Fallback: if specific element not found, try to find any referrer email input
+                if (!referrerElement || !referrerEmail) {
+                    console.log('🔍 Primary referrer element not found in startTaskDirectly, trying fallback...');
+                    const allReferrerInputs = document.querySelectorAll('input[id*="referrer-email"]');
+                    console.log('Found referrer inputs:', allReferrerInputs.length);
+
+                    for (let input of allReferrerInputs) {
+                        if (input.value && input.value.trim()) {
+                            referrerElement = input;
+                            referrerEmail = input.value.trim();
+                            console.log('Using fallback referrer input:', input.id, input.value);
+                            break;
+                        }
+                    }
+                }
+
+                console.log('📧 Referrer email debugging (startTaskDirectly):', {
+                    requiresReferrer: task.requires_referrer_email,
+                    passedReferrerEmail: passedReferrerEmail,
+                    elementId: `referrer-email-${task.id}`,
+                    elementExists: !!referrerElement,
+                    elementValue: referrerElement ? referrerElement.value : 'Element not found',
+                    trimmedValue: referrerEmail,
+                    allReferrerInputs: document.querySelectorAll('input[id*="referrer-email"]').length
+                });
+            } else if (task.requires_referrer_email && referrerEmail) {
+                console.log('📧 Using passed referrer email:', referrerEmail);
+            }
+
+            // Validate referrer email if required
+            if (task.requires_referrer_email) {
+                if (!referrerEmail) {
+                    this.showToast('Referrer email is required for this task. Please enter a valid email address.', 'error');
+                    // Focus on the referrer email input if it exists
+                    const referrerElement = document.getElementById(`referrer-email-${task.id}`) || document.querySelector('input[id*="referrer-email"]');
+                    if (referrerElement) {
+                        referrerElement.focus();
+                    }
+                    return;
+                }
+
+                // Basic email validation
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(referrerEmail)) {
+                    this.showToast('Please enter a valid email address for the referrer.', 'error');
+                    return;
+                }
+            }
+
+            // Create task submission
+            const submissionData = {
+                task_id: task.id,
+                user_id: this.currentUser.uid,
+                status: 'in_progress',
+                restart_count: 0,
+                referrer_email: referrerEmail
+            };
+
+            console.log('💾 Creating task submission...');
+            await window.firestoreManager.createTaskSubmission(submissionData);
+            console.log('✅ Task submission created');
+
+            // Start the timer for this task
+            console.log('⏰ Starting timer for task:', task.id);
+            window.startTaskTimer(task.id);
+
+            // Update task status to in_progress in the database
+            const statusData = {
+                startedAt: new Date(),
+                timerSynced: true
+            };
+
+            // Save referrer email if provided
+            if (referrerEmail) {
+                statusData.referrer_email = referrerEmail;
+            }
+
+            await window.firestoreManager.updateTaskStatus(task.id, 'in_progress', this.currentUser.uid, statusData);
+
+            this.showToast('✅ Task started successfully! Timer is now running. Click the task again when you\'re ready to submit.', 'success');
+
+            // Close the task detail modal
+            const taskModal = document.getElementById('task-detail-modal');
+            if (taskModal) {
+                taskModal.remove();
+            }
+
+            // Reload tasks to update status
+            await this.loadTasks();
+
+        } catch (error) {
+            console.error('❌ Error starting task:', error);
+            this.showToast(`❌ Failed to start task: ${error.message}`, 'error');
+        }
+    }
+
+    async showTaskRestartOptions(task, taskStatus) {
+        console.log('Creating task restart options modal...');
+
+        // Remove any existing modals first
+        const existingModal = document.getElementById('task-restart-modal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+
+        // Get user's restart count
+        const submissions = await window.firestoreManager.getTaskSubmissions('all');
+        const userSubmission = submissions.find(s =>
+            s.task_id === task.id && s.user_id === this.currentUser.uid
+        );
+
+        const currentRestartCount = userSubmission?.restart_count || 0;
+        const maxRestarts = task.max_restarts || 3;
+        const canRestart = currentRestartCount < maxRestarts;
+        const remainingRestarts = maxRestarts - currentRestartCount;
+
+        const modal = document.createElement('div');
+        modal.id = 'task-restart-modal';
+        modal.className = 'modal';
+        modal.style.display = 'block';
+        modal.style.visibility = 'visible';
+        modal.style.opacity = '1';
+
+        modal.innerHTML = `
+            <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
+            <div class="modal-container max-w-2xl">
+                <div class="modal-header">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h3 class="modal-title text-xl font-semibold text-gray-900 mb-2">Task Completed!</h3>
+                                <p class="text-gray-600">${task.title || 'Untitled Task'}</p>
+                            </div>
+                        </div>
+                        <button id="close-task-restart-modal" class="modal-close">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="modal-form">
+                    <div class="space-y-6">
+                        ${canRestart ? `
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <h4 class="form-label text-blue-800 mb-2">Restart Task</h4>
+                                <p class="text-blue-700 mb-3">You can restart this task ${remainingRestarts} more time${remainingRestarts > 1 ? 's' : ''}.</p>
+                                <button onclick="window.dashboardHandler.restartTask('${task.id}', this)" class="btn btn-primary">
+                                    <i class="fas fa-redo mr-2"></i>
+                                    Restart Task
+                                </button>
+                            </div>
+                        ` : `
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <h4 class="form-label text-gray-800 mb-2">Maximum Restarts Reached</h4>
+                                <p class="text-gray-700">You have reached the maximum number of restarts (${maxRestarts}) for this task.</p>
+                            </div>
+                        `}
+
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <h4 class="form-label">Task Details</h4>
+                            <div class="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <span class="font-medium text-gray-600">Reward:</span>
+                                    <span class="text-gray-900">₱${task.reward}</span>
+                                </div>
+                                <div>
+                                    <span class="font-medium text-gray-600">Completed:</span>
+                                    <span class="text-gray-900">${currentRestartCount + 1} time${currentRestartCount > 0 ? 's' : ''}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                        <i class="fas fa-times"></i>
+                        Close
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Setup close button
+        document.getElementById('close-task-restart-modal').addEventListener('click', () => {
+            modal.remove();
+        });
+    }
+
+    async restartTask(taskId, button = null) {
+        try {
+            console.log('🔄 Restarting task:', taskId);
+
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Restarting...');
+            }
+
+            // Get task details
+            const tasks = await window.firestoreManager.getTasks();
+            const task = tasks.find(t => t.id === taskId);
+
+            if (!task) {
+                this.showToast('Task not found', 'error');
+                return;
+            }
+
+            // Close the restart modal first
+            const restartModal = document.getElementById('task-restart-modal');
+            if (restartModal) {
+                restartModal.remove();
+            }
+
+            // Update task submission to restart (in_progress status)
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === this.currentUser.uid
+            );
+
+            if (userSubmission) {
+                // Instead of updating the existing submission, create a new one for restart
+                // This preserves the completion history
+                const restartCount = (userSubmission.restart_count || 0) + 1;
+                const submissionData = {
+                    task_id: taskId,
+                    user_id: this.currentUser.uid,
+                    status: 'available', // Set to available so user can input email again
+                    restart_count: restartCount,
+                    created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                    updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                await window.firestoreManager.createTaskSubmission(submissionData);
+                console.log(`🔄 Created new submission for restart #${restartCount}: ${taskId}`);
+            } else {
+                // If no submission exists, create a new one
+                const submissionData = {
+                    task_id: taskId,
+                    user_id: this.currentUser.uid,
+                    status: 'available', // Set to available so user can input email again
+                    restart_count: 0,
+                    created_at: firebase.firestore.FieldValue.serverTimestamp(),
+                    updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                await window.firestoreManager.createTaskSubmission(submissionData);
+                console.log(`🆕 Created new task submission for restart: ${taskId}`);
+            }
+
+            // Clear stored start time from localStorage
+            const startTimeKey = `task_start_${taskId}_${this.currentUser.uid}`;
+            localStorage.removeItem(startTimeKey);
+            console.log(`🗑️ Cleared start time from localStorage: ${startTimeKey}`);
+
+            // Clear expired flag from localStorage
+            const expiredKey = `task_expired_${taskId}_${this.currentUser.uid}`;
+            localStorage.removeItem(expiredKey);
+            console.log(`🗑️ Cleared expired flag from localStorage: ${expiredKey}`);
+
+            // Clear any completion flags or progress data
+            const completionKey = `task_completed_${taskId}_${this.currentUser.uid}`;
+            localStorage.removeItem(completionKey);
+
+            // Also clear any existing verifications for this task to start fresh
+            const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
+            const taskVerifications = verifications.filter(v => v.taskId === taskId);
+
+            for (const verification of taskVerifications) {
+                // Delete old verifications to start completely fresh
+                await window.firestoreManager.deleteVerification(verification.id);
+                console.log('🗑️ Deleted old verification:', verification.id);
+            }
+
+            // Clear and restart all countdown timers to ensure fresh state
+            if (this.countdownTimers) {
+                this.countdownTimers.forEach(timer => clearInterval(timer));
+                this.countdownTimers = [];
+            }
+
+            this.showToast(`✅ Task restarted! Please input your email and start the task again.`, 'success');
+
+            // Close all modals
+            this.closeAllModals();
+
+            // Add a small delay to ensure database update has propagated
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Reload tasks to update status
+            await this.loadTasks();
+
+        } catch (error) {
+            console.error('❌ Error restarting task:', error);
+            this.showToast(`❌ Failed to restart task: ${error.message}`, 'error');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
+        }
+    }
+
+    // Show task completion form with proof upload
+    async showTaskCompletionForm(taskId, button = null) {
+        try {
+            console.log('📝 Showing task completion form for:', taskId);
+
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Loading...');
+            }
+
+            // Get task details
+            const tasks = await window.firestoreManager.getTasks();
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) {
+                this.showToast('Task not found', 'error');
+                return;
+            }
+
+            // Remove any existing completion modals
+            const existingModal = document.getElementById('task-completion-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'task-completion-modal';
+            modal.className = 'modal';
+            modal.style.display = 'block';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+
+            modal.innerHTML = `
+                <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
+                <div class="modal-container max-w-2xl">
+                    <div class="modal-header">
+                        <div class="flex items-start justify-between">
+                            <div class="flex items-center space-x-4">
+                                <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <h3 class="modal-title text-xl font-semibold text-gray-900 mb-2">Complete Task</h3>
+                                    <p class="text-gray-600">${task.title || 'Untitled Task'}</p>
+                                    <p class="text-sm text-green-600 mt-1">Upload proof of completion to submit for review</p>
+                                </div>
+                            </div>
+                            <button id="close-task-completion-modal" class="modal-close">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="modal-form">
+                        <div class="space-y-6">
+                            ${task.description ? `
+                                <div class="form-group">
+                                    <h4 class="form-label">Task Description</h4>
+                                    <p class="text-gray-700">${task.description}</p>
+                                </div>
+                            ` : ''}
+
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <h4 class="form-label text-blue-800 mb-2">Submit Your Completion</h4>
+                                <p class="text-blue-700 mb-4">Upload proof of task completion and add notes:</p>
+                                
+                                <form id="task-completion-form" class="space-y-4">
+                                    <div class="form-group">
+                                        <label class="form-label">Completion Screenshot *</label>
+                                        <input type="file" id="completion-proof" class="form-input" accept="image/*" required>
+                                        <small class="form-help">Upload a screenshot showing task completion</small>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label class="form-label">Completion Notes</label>
+                                        <textarea id="completion-notes" class="form-textarea" rows="3" placeholder="Describe how you completed the task (optional)"></textarea>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">
+                            <i class="fas fa-times"></i>
+                            Cancel
+                        </button>
+                        <button type="submit" class="btn btn-primary" form="task-completion-form">
+                            <i class="fas fa-check"></i>
+                            Submit Completion
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+
+            // Setup form submission
+            const form = document.getElementById('task-completion-form');
+            if (form) {
+                form.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    await this.submitTaskCompletion(taskId, modal);
+                });
+            }
+
+            // Setup close button
+            document.getElementById('close-task-completion-modal').addEventListener('click', () => {
+                modal.remove();
+            });
+
+            // Setup form submission
+            const completionForm = document.getElementById('task-completion-form');
+            if (completionForm) {
+                completionForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const submitBtn = e.target.querySelector('button[type="submit"]');
+                    this.submitTaskCompletion(taskId, modal, submitBtn);
+                });
+            }
+
+        } catch (error) {
+            console.error('Error showing task completion form:', error);
+            this.showToast('Failed to load completion form', 'error');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
+        }
+    }
+
+    async submitTaskCompletion(taskId, modal, button = null) {
+        return await window.loadingManager.withDatabaseLoading(async () => {
+            console.log('🔄 Submitting task completion...');
+
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Submitting...');
+            }
+
+            const completionProof = document.getElementById('completion-proof').files[0];
+            const completionNotes = document.getElementById('completion-notes').value.trim();
+
+            if (!completionProof) {
+                this.showToast('Please upload a completion screenshot', 'error');
+                return;
+            }
+
+            // Show loading state
+            this.showToast('📤 Uploading screenshot...', 'info');
+
+            // Upload screenshot to Firebase Storage
+            console.log('📤 Uploading completion screenshot...');
+            const screenshotUrl = await this.uploadScreenshot(completionProof, `task_completion_${taskId}_${this.currentUser.uid}`);
+            console.log('✅ Screenshot uploaded:', screenshotUrl);
+
+            // Get current submission and update it to pending_review
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === this.currentUser.uid
+            );
+
+            if (userSubmission) {
+                // Update existing submission to pending_review, preserving referrer email
+                await window.firestoreManager.updateTaskSubmission(userSubmission.id, {
+                    status: 'pending_review',
+                    proof_image_url: screenshotUrl,
+                    notes: completionNotes || 'Task completed and submitted',
+                    updated_at: firebase.firestore.FieldValue.serverTimestamp()
+                    // Note: referrer_email is already in the existing submission, so we don't need to update it
+                });
+                console.log('✅ Task submission updated to pending_review');
+                console.log('📧 Preserved referrer email:', userSubmission.referrer_email);
+            } else {
+                // Create new submission if none exists (shouldn't happen for completion)
+                const submissionData = {
+                    task_id: taskId,
+                    user_id: this.currentUser.uid,
+                    status: 'pending_review',
+                    restart_count: 0,
+                    referrer_email: null, // This case shouldn't happen for task completion
+                    proof_image_url: screenshotUrl,
+                    notes: completionNotes || 'Task completed and submitted'
+                };
+                await window.firestoreManager.createTaskSubmission(submissionData);
+                console.log('✅ Task submission created');
+            }
+
+            this.showToast('✅ Task completion submitted successfully! Your submission is now under review.', 'success');
+            modal.remove();
+
+            // Also close the main task detail modal
+            const taskDetailModal = document.getElementById('task-detail-modal');
+            if (taskDetailModal) {
+                taskDetailModal.remove();
+            }
+
+            await this.loadTasks();
+
+        }, 'Submitting Task Completion', 'Please wait while we process your submission...').finally(() => {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
+        });
+    }
+
+    // Resubmit task after rejection
+    async resubmitTask(taskId, button = null) {
+        try {
+            console.log('🔄 Resubmitting task:', taskId);
+
+            // Set button loading state
+            if (button) {
+                this.setButtonLoading(button, true, 'Resubmitting...');
+            }
+
+            // Close the task detail modal first
+            const taskDetailModal = document.getElementById('task-detail-modal');
+            if (taskDetailModal) {
+                taskDetailModal.remove();
+            }
+
+            // Small delay to ensure modal closes smoothly
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Get task details
+            const tasks = await window.firestoreManager.getTasks();
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) {
+                this.showToast('Task not found', 'error');
+                return;
+            }
+
+            // Check if user has a rejected submission
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === this.currentUser.uid
+            );
+
+            if (!userSubmission || userSubmission.status !== 'rejected') {
+                this.showToast('No rejected submission found for this task', 'error');
+                return;
+            }
+
+            // Show completion form for resubmission
+            await this.showTaskCompletionForm(taskId);
+
+            // Show success message
+            this.showToast('📝 Please upload new proof and resubmit your application', 'info');
+
+        } catch (error) {
+            console.error('Error resubmitting task:', error);
+            this.showToast('Failed to resubmit task: ' + error.message, 'error');
+        } finally {
+            // Reset button loading state
+            if (button) {
+                this.setButtonLoading(button, false);
+            }
+        }
+    }
+
     async submitPhase1Verification(taskId, modal) {
         let loadingModal = null;
 
@@ -3615,6 +6191,32 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const screenshotUrl = await this.uploadScreenshot(screenshot, `phase1_${taskId}_${this.currentUser.uid}`);
             console.log('✅ Screenshot uploaded:', screenshotUrl);
 
+            // Get task details to check for referrer email requirement
+            const tasks = await window.firestoreManager.getTasks();
+            const task = tasks.find(t => t.id === taskId);
+
+            // Get referrer email from saved task status instead of input field
+            let referrerEmail = null;
+            if (task?.requires_referrer_email) {
+                const taskStatus = await window.firestoreManager.getTaskStatusForUser(this.currentUser.uid, taskId);
+                referrerEmail = taskStatus?.referrer_email || null;
+
+                // Fallback to input field if not found in task status (for backward compatibility)
+                if (!referrerEmail) {
+                    const referrerElement = document.getElementById(`referrer-email-${taskId}`);
+                    referrerEmail = referrerElement ? referrerElement.value.trim() : null;
+                }
+            }
+
+            console.log('📧 Referrer email for Phase 1 verification:', {
+                taskId: taskId,
+                requiresReferrer: task?.requires_referrer_email,
+                referrerEmail: referrerEmail,
+                elementId: `referrer-email-${taskId}`,
+                elementValue: document.getElementById(`referrer-email-${taskId}`)?.value,
+                taskStatusReferrer: taskStatus?.referrer_email
+            });
+
             const verificationData = {
                 taskId: taskId,
                 userId: this.currentUser.uid,
@@ -3624,12 +6226,26 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 androidVersion: androidVersion,
                 screenshots: [screenshotUrl],
                 notes: notes || 'Phase 1 verification submitted',
+                referrer_email: referrerEmail,
                 createdAt: new Date()
             };
 
             console.log('💾 Saving verification data...');
             await window.firestoreManager.createVerification(verificationData);
             console.log('✅ Verification data saved');
+
+            // Also create a task submission for tracking
+            if (task) {
+                const submissionData = {
+                    task_id: taskId,
+                    user_id: this.currentUser.uid,
+                    status: 'pending_review',
+                    restart_count: 0,
+                    referrer_email: referrerEmail
+                };
+                await window.firestoreManager.createTaskSubmission(submissionData);
+                console.log('✅ Task submission created');
+            }
 
             // Update task status to pending
             await window.firestoreManager.updateTaskStatus(taskId, 'pending');
@@ -3739,31 +6355,20 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 throw new Error('File size must be less than 5MB');
             }
 
-            // Use Supabase Storage with fallback
+            // Use ImgBB for image upload
             try {
-                console.log('📤 Uploading to Supabase Storage...');
+                console.log('📤 Uploading to ImgBB...');
 
-                // Check if Supabase is properly configured
-                if (!window.supabaseStorageManager || !window.supabaseClient) {
-                    throw new Error('Supabase not properly configured');
+                // Check if StorageManager is available
+                if (!window.storageManager) {
+                    throw new Error('StorageManager not properly configured');
                 }
 
-                // Extract phase and taskId from filename
-                const parts = filename.split('_');
-                const phase = parts[0];
-                const taskId = parts[1];
-
-                const downloadURL = await window.supabaseStorageManager.uploadVerificationImage(
-                    file,
-                    this.currentUser.uid,
-                    taskId,
-                    phase
-                );
-
-                console.log('✅ Screenshot uploaded successfully via Supabase:', downloadURL);
-                return downloadURL;
-            } catch (supabaseError) {
-                console.error('❌ Supabase upload failed:', supabaseError);
+                const result = await window.storageManager.uploadToImgBB(file, filename);
+                console.log('✅ Screenshot uploaded successfully via ImgBB:', result.url);
+                return result.url;
+            } catch (imgbbError) {
+                console.error('❌ ImgBB upload failed:', imgbbError);
 
                 // Fallback: Create a compressed data URL for testing (within Firestore limits)
                 console.log('🔄 Using fallback method for testing...');
@@ -3888,22 +6493,22 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 await this.waitForAuthentication();
             }
 
-            const withdrawals = await window.firestoreManager.getWithdrawalsByUser(this.currentUser.uid);
-            const verifications = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
+            // Check if user is disabled
+            const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
+            if (userDoc.exists && userDoc.data().status === 'disabled') {
+                this.showAccountDisabledNotice();
+                return;
+            }
 
-            // Combine and sort by date
-            const history = [
-                ...withdrawals.map(w => ({ ...w, type: 'withdrawal' })),
-                ...verifications.filter(v => v.status === 'approved' && v.phase === 'final')
-                    .map(v => ({ ...v, type: 'earning' }))
-            ].sort((a, b) => new Date(b.createdAt?.toDate()) - new Date(a.createdAt?.toDate()));
-
-            await this.renderWalletHistory(history);
+            // Use the new balance tracking system
+            await this.loadTransactionHistory();
         } catch (error) {
             console.error('Error loading wallet history:', error);
             this.showToast('Failed to load wallet history', 'error');
         } finally {
             this.hidePageLoading(pageLoading);
+            // Mark wallet data as loaded
+            this.markDataLoaded('wallet');
         }
     }
 
@@ -3945,7 +6550,8 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                     </div>
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-900">Withdrawal Request</p>
-                        <p class="text-sm text-gray-500">${withdrawal.method.toUpperCase()} - ${withdrawal.account}</p>
+                        <p class="text-sm text-gray-500">${withdrawal.method.toUpperCase()} - ${withdrawal.account_details}</p>
+                        <p class="text-xs text-gray-400">Reference: ${withdrawal.referenceNumber || 'N/A'}</p>
                         <p class="text-xs text-gray-400">${new Date(withdrawal.createdAt?.toDate()).toLocaleString()}</p>
                         ${withdrawal.rejectionReason ? `
                             <div class="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -3991,6 +6597,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-900">Task Completed</p>
                         <p class="text-sm text-gray-500">Task Reward</p>
+                        <p class="text-xs text-gray-400">Reference: ${verification.referenceNumber || 'N/A'}</p>
                         <p class="text-xs text-gray-400">${new Date(verification.createdAt?.toDate()).toLocaleString()}</p>
                     </div>
                 </div>
@@ -4015,31 +6622,6 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         }
     }
 
-    async loadActivityHistory() {
-        try {
-            // Check if user is authenticated
-            if (!this.currentUser) {
-                console.log('User not authenticated yet, waiting...');
-                await this.waitForAuthentication();
-            }
-
-            const [verifications, withdrawals] = await Promise.all([
-                window.firestoreManager.getVerificationsByUser(this.currentUser.uid),
-                window.firestoreManager.getWithdrawalsByUser(this.currentUser.uid)
-            ]);
-
-            // Combine and sort by date - ONLY user-initiated activities
-            const activities = [
-                ...verifications.map(v => ({ ...v, type: 'verification' })),
-                ...withdrawals.map(w => ({ ...w, type: 'withdrawal' }))
-            ].sort((a, b) => new Date(b.createdAt?.toDate()) - new Date(a.createdAt?.toDate()));
-
-            this.renderActivityHistory(activities);
-        } catch (error) {
-            console.error('Error loading activity history:', error);
-            this.showToast('Failed to load activity history', 'error');
-        }
-    }
 
     renderActivityHistory(activities) {
         const container = document.getElementById('activity-history');
@@ -4077,6 +6659,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                         <p class="text-sm font-medium text-gray-900">${verification.phase === 'initial' ? 'Initial' : 'Final'} Verification</p>
                         <p class="text-sm text-gray-500">Task Verification</p>
                         <p class="text-xs text-gray-400">Game ID: ${verification.gameId}</p>
+                        <p class="text-xs text-gray-400">Reference: ${verification.referenceNumber || 'N/A'}</p>
                         <p class="text-xs text-gray-400">${new Date(verification.createdAt?.toDate()).toLocaleString()}</p>
                     </div>
                 </div>
@@ -4101,6 +6684,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                     <div class="ml-4">
                         <p class="text-sm font-medium text-gray-900">Withdrawal Request</p>
                         <p class="text-sm text-gray-500">₱${withdrawal.amount} via ${withdrawal.method.toUpperCase()}</p>
+                        <p class="text-xs text-gray-400">Reference: ${withdrawal.referenceNumber || 'N/A'}</p>
                         <p class="text-xs text-gray-400">${date}</p>
                     </div>
                 </div>
@@ -4165,9 +6749,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         if (!submitBtn) return;
 
         if (this.isSubmittingWithdrawal) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-            submitBtn.style.opacity = '0.6';
+            this.setButtonLoading(submitBtn, true, 'Processing...');
             return;
         }
 
@@ -4238,16 +6820,30 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
     async submitWithdrawal() {
         const now = Date.now();
 
-        // INSTANT LOCAL CHECK - No database calls needed
+        // INSTANT UI BLOCKING - Set immediately to prevent spam
         if (this.isSubmittingWithdrawal) {
             this.showToast('⏳ Please wait, withdrawal is being processed...', 'warning');
             return;
         }
 
+        // IMMEDIATELY set the flag to prevent multiple submissions
+        this.isSubmittingWithdrawal = true;
+
+        // Add timeout protection to prevent stuck button
+        const timeoutId = setTimeout(() => {
+            if (this.isSubmittingWithdrawal) {
+                console.warn('Withdrawal submission timeout - resetting state');
+                this.isSubmittingWithdrawal = false;
+                this.resetWithdrawalButton();
+            }
+        }, 30000); // 30 second timeout
+
         // Check cooldown period
         if (this.lastWithdrawalTime && (now - this.lastWithdrawalTime) < this.withdrawalCooldown) {
             const remainingTime = Math.ceil((this.withdrawalCooldown - (now - this.lastWithdrawalTime)) / 1000);
             this.showToast(`⏰ Please wait ${remainingTime} seconds before next withdrawal`, 'warning');
+            this.isSubmittingWithdrawal = false; // Reset flag on early return
+            this.resetWithdrawalButton(); // Reset button
             return;
         }
 
@@ -4258,17 +6854,20 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 const userData = userDoc.data();
                 if (userData.status === 'disabled') {
                     this.showToast('❌ Your account is disabled. You cannot make withdrawals.', 'error');
+                    this.isSubmittingWithdrawal = false; // Reset flag on early return
+                    this.resetWithdrawalButton(); // Reset button
                     return;
                 }
             }
         } catch (error) {
             console.error('Error checking account status:', error);
             this.showToast('❌ Failed to verify account status', 'error');
+            this.isSubmittingWithdrawal = false; // Reset flag on early return
+            this.resetWithdrawalButton(); // Reset button
             return;
         }
 
-        // INSTANT UI BLOCKING - No async operations
-        this.isSubmittingWithdrawal = true;
+        // Set withdrawal time after all checks pass
         this.lastWithdrawalTime = now;
 
         // Store in localStorage for persistence across page reloads
@@ -4278,9 +6877,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         // INSTANT UI UPDATE
         const submitBtn = document.querySelector('#withdrawal-form button[type="submit"]');
         if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-            submitBtn.style.opacity = '0.6';
+            this.setButtonLoading(submitBtn, true, 'Processing...');
         }
 
         let loadingModal = null;
@@ -4311,26 +6908,23 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 return;
             }
 
-            // Create withdrawal request
-            const withdrawalId = await window.firestoreManager.createWithdrawal({
-                userId: this.currentUser.uid,
+            // Create withdrawal request and deduct balance in a single transaction
+            const result = await window.firestoreManager.createWithdrawalRequestWithBalanceDeduction({
+                user_id: this.currentUser.uid,
                 amount: amount,
                 method: method,
-                account: account
+                account_details: account
             });
-
-            // Immediately decrease user's wallet balance
-            await window.firestoreManager.updateWalletBalance(this.currentUser.uid, -amount);
 
             // Create notification for withdrawal submission
             await window.firestoreManager.createAdminNotification(this.currentUser.uid, {
                 type: 'withdrawal_submitted',
                 title: '💸 Withdrawal Request Submitted',
-                message: `Your withdrawal request of ₱${amount} via ${method} has been submitted and is pending admin approval.`,
-                data: { withdrawalId: withdrawalId, amount: amount, method: method }
+                message: `Your withdrawal request of ₱${amount} via ${method} has been submitted and is pending admin approval. Reference: ${result.referenceNumber}`,
+                data: { withdrawalId: result.id, amount: amount, method: method, referenceNumber: result.referenceNumber }
             });
 
-            this.showToast('✅ Withdrawal request submitted successfully! Balance updated.', 'success');
+            this.showToast(`✅ Withdrawal request submitted successfully! Reference: ${result.referenceNumber}`, 'success');
             this.closeWithdrawalModal();
 
             // Reload user data and wallet history to show updated balance
@@ -4341,6 +6935,11 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             console.error('Error submitting withdrawal:', error);
             this.showToast('❌ Failed to submit withdrawal: ' + error.message, 'error');
         } finally {
+            // Clear timeout
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+
             // Reset flags and UI
             this.isSubmittingWithdrawal = false;
             this.hideLoadingModal(loadingModal);
@@ -4349,22 +6948,50 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             localStorage.removeItem('isSubmittingWithdrawal');
 
             // Re-enable submit button
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Request';
-                submitBtn.style.opacity = '1';
-            }
+            this.resetWithdrawalButton();
         }
     }
 
     closeTaskModal() {
+        // Close task detail modal
+        const taskDetailModal = document.getElementById('task-detail-modal');
+        if (taskDetailModal) {
+            taskDetailModal.remove();
+        }
+
+        // Also close any other task modals
         const modal = document.getElementById('task-modal');
-        modal.classList.add('hidden');
+        if (modal) {
+            modal.classList.add('hidden');
+        }
     }
 
     closeAllModals() {
         this.closeTaskModal();
         this.closeWithdrawalModal();
+
+        // Also close task detail modal
+        const taskDetailModal = document.getElementById('task-detail-modal');
+        if (taskDetailModal) {
+            taskDetailModal.remove();
+        }
+
+        // Close any other modals that might be open
+        const allModals = document.querySelectorAll('.modal');
+        allModals.forEach(modal => {
+            if (modal.id !== 'task-modal' && modal.id !== 'withdrawal-modal') {
+                modal.remove();
+            }
+        });
+    }
+
+    resetWithdrawalButton() {
+        const submitBtn = document.querySelector('#withdrawal-form button[type="submit"]');
+        if (submitBtn) {
+            this.setButtonLoading(submitBtn, false);
+            // Ensure correct withdrawal button text
+            submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Request';
+        }
     }
 
     // Notifications
@@ -4379,6 +7006,13 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             if (!this.currentUser) {
                 console.log('User not authenticated yet, waiting...');
                 await this.waitForAuthentication();
+            }
+
+            // Check if user is disabled
+            const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
+            if (userDoc.exists && userDoc.data().status === 'disabled') {
+                this.showAccountDisabledNotice();
+                return;
             }
 
             console.log('Loading notifications...');
@@ -4447,6 +7081,8 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             this.showToast('Failed to load notifications', 'error');
         } finally {
             this.hidePageLoading(pageLoading);
+            // Mark notifications data as loaded
+            this.markDataLoaded('notifications');
         }
     }
 
@@ -4469,7 +7105,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
 
     createNotificationItem(notification, isPopup = false) {
         const isRead = notification.isRead;
-        const date = notification.createdAt ? new Date(notification.createdAt.toDate()).toLocaleString() : 'Unknown';
+        const date = notification.createdAt ? new Date(notification.createdAt.toDate()).toLocaleString() : 'Just now';
 
         // For popup, show shorter format
         if (isPopup) {
@@ -4498,14 +7134,49 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                         <p class="notification-title">${notification.title}</p>
                         <p class="notification-message">${notification.message}</p>
                         <div class="auto-reject-details">
-                            <div class="auto-reject-task">Task: ${notification.data?.taskTitle || 'Unknown'}</div>
-                            <div class="auto-reject-gameid">Game ID: ${notification.data?.gameId || 'Unknown'}</div>
+                            <div class="auto-reject-task">Task: ${notification.data?.taskTitle || 'N/A'}</div>
+                            <div class="auto-reject-gameid">Game ID: ${notification.data?.gameId || 'N/A'}</div>
                         </div>
                         <p class="notification-time">${date}</p>
                     </div>
                     <div class="text-right">
                         <span class="status-badge status-rejected">
                             Auto-Rejected
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Special handling for withdrawal approved notifications
+        if (notification.type === 'withdrawal_approved') {
+            // Debug: Log notification data to see what's available
+            console.log('Withdrawal approved notification data:', notification.data);
+            console.log('Full notification object:', notification);
+
+            // Extract data with better fallback handling
+            const method = notification.data?.paymentMethod || notification.data?.method || 'N/A';
+            const reference = notification.data?.referenceNumber || notification.data?.reference_number || 'N/A';
+
+            console.log('Extracted method:', method, 'reference:', reference);
+
+            return `
+                <div class="notification-item ${isRead ? 'read' : 'unread'} withdrawal-approved" data-notification-id="${notification.id}">
+                    <div class="notification-icon ${this.getNotificationIconClass(notification.type)}">
+                        <i class="${this.getNotificationIcon(notification.type)}"></i>
+                    </div>
+                    <div class="notification-content">
+                        <p class="notification-title">${notification.title}</p>
+                        <p class="notification-message">${notification.message}</p>
+                        <div class="withdrawal-details">
+                            <div class="withdrawal-method">Method: ${method}</div>
+                            <div class="withdrawal-reference">Ref: ${reference}</div>
+                        </div>
+                        <p class="notification-time">${date}</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="status-badge status-approved">
+                            Approved
                         </span>
                     </div>
                 </div>
@@ -4670,12 +7341,80 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         });
     }
 
-    showLoading(show) {
-        const spinner = document.getElementById('loading-spinner');
-        if (show) {
-            spinner.classList.remove('hidden');
+    // showLoading method removed - now using LoadingManager
+
+    // Button loading state utilities
+    setButtonLoading(button, isLoading, loadingText = 'Processing...') {
+        if (!button) return;
+
+        if (isLoading) {
+            // Store original content
+            button.dataset.originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = `
+                <i class="fas fa-spinner fa-spin"></i>
+                ${loadingText}
+            `;
+            button.classList.add('loading');
+
+            // Add click prevention
+            button.style.pointerEvents = 'none';
+            button.style.cursor = 'not-allowed';
         } else {
-            spinner.classList.add('hidden');
+            // Restore original content
+            if (button.dataset.originalText) {
+                button.innerHTML = button.dataset.originalText;
+                delete button.dataset.originalText;
+            }
+            button.disabled = false;
+            button.classList.remove('loading');
+
+            // Restore click functionality
+            button.style.pointerEvents = 'auto';
+            button.style.cursor = 'pointer';
+        }
+    }
+
+    // Card loading state utilities
+    setCardLoading(cardElement, isLoading) {
+        if (!cardElement) return;
+
+        if (isLoading) {
+            // Store original classes
+            cardElement.dataset.originalClasses = cardElement.className;
+
+            // Add loading state
+            cardElement.classList.add('card-loading');
+            cardElement.style.pointerEvents = 'none';
+            cardElement.style.cursor = 'not-allowed';
+            cardElement.style.opacity = '0.7';
+
+            // Add loading overlay
+            let loadingOverlay = cardElement.querySelector('.card-loading-overlay');
+            if (!loadingOverlay) {
+                loadingOverlay = document.createElement('div');
+                loadingOverlay.className = 'card-loading-overlay';
+                loadingOverlay.innerHTML = `
+                    <div class="loading-spinner">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </div>
+                    <div class="loading-text">Loading...</div>
+                `;
+                cardElement.style.position = 'relative';
+                cardElement.appendChild(loadingOverlay);
+            }
+        } else {
+            // Restore original state
+            cardElement.classList.remove('card-loading');
+            cardElement.style.pointerEvents = 'auto';
+            cardElement.style.cursor = 'pointer';
+            cardElement.style.opacity = '1';
+
+            // Remove loading overlay
+            const loadingOverlay = cardElement.querySelector('.card-loading-overlay');
+            if (loadingOverlay) {
+                loadingOverlay.remove();
+            }
         }
     }
 
@@ -4828,27 +7567,202 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         }
     }
 
-    // Test Supabase Storage connectivity
+    // Test storage connectivity
     async testStorageConnectivity() {
         try {
-            console.log('🔍 Testing Supabase Storage connectivity...');
+            console.log('🔍 Testing ImgBB Storage connectivity...');
 
-            if (window.supabaseStorageManager) {
-                console.log('✅ Supabase Storage Manager is available');
-                console.log('✅ Supabase Storage is ready for uploads');
-                return true;
+            if (window.storageManager) {
+                console.log('✅ Storage Manager is available');
+                if (window.CONFIG?.IMGBB_API_KEY && window.CONFIG.IMGBB_API_KEY !== 'YOUR_IMGBB_API_KEY') {
+                    console.log('✅ ImgBB API key is configured');
+                    console.log('✅ ImgBB Storage is ready for uploads');
+                    return true;
+                } else {
+                    console.warn('⚠️ ImgBB API key not configured - please update config.js');
+                    return false;
+                }
             } else {
-                console.warn('⚠️ Supabase Storage Manager not available');
+                console.warn('⚠️ Storage Manager not available');
                 return false;
             }
 
         } catch (error) {
-            console.error('❌ Supabase Storage connectivity test failed:', error);
+            console.error('❌ Storage connectivity test failed:', error);
             return false;
         }
     }
 
+    // Helper function to get user balance changes
+    async getUserBalanceChanges() {
+        try {
+            console.log('🔍 Loading balance changes for user:', this.currentUser.uid);
+            const snapshot = await db.collection('balance_changes')
+                .where('userId', '==', this.currentUser.uid)
+                .get();
+
+            if (snapshot.empty) {
+                console.log('No balance changes found for user');
+                return [];
+            }
+
+            const changes = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+
+            console.log('📊 Balance changes loaded:', changes.map(c => ({
+                reason: c.reason,
+                changeAmount: c.changeAmount,
+                timestamp: c.timestamp
+            })));
+
+            // Sort by createdAt in JavaScript to avoid Firestore index requirement
+            return changes.sort((a, b) => {
+                const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+                const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+                return dateB - dateA; // Descending order (newest first)
+            });
+        } catch (error) {
+            console.error('Error getting balance changes:', error);
+            // Return empty array instead of throwing error to prevent breaking the UI
+            return [];
+        }
+    }
+
+    // Helper function to generate balance change descriptions
+    getBalanceChangeDescription(change) {
+        switch (change.reason) {
+            case 'task_approved':
+                return `Task Completed: ${change.metadata?.taskTitle || 'Task'}`;
+            case 'withdrawal_submitted':
+                return `Withdrawal Submitted: ${change.metadata?.paymentMethod || 'Processing...'}`;
+            case 'withdrawal_approved':
+                return `Withdrawal Approved: ${change.metadata?.paymentMethod || 'Processing...'}`;
+            case 'withdrawal_rejected':
+                return `Withdrawal Rejected: ${change.metadata?.paymentMethod || 'Processing...'}`;
+            case 'withdrawal_rejected_refund':
+                return `Withdrawal Refunded: ${change.metadata?.paymentMethod || 'Processing...'}`;
+            case 'admin_balance_adjustment':
+                const action = change.metadata?.action || 'adjusted';
+                const reason = change.metadata?.reason || 'Admin adjustment';
+                return `Balance ${action === 'add' ? 'Increased' : action === 'subtract' ? 'Decreased' : 'Set'} by Admin: ${reason}`;
+            case 'balance_change':
+                return 'Balance Updated by Admin';
+            default:
+                return 'Balance Change';
+        }
+    }
+
+    getStatusForReason(reason) {
+        switch (reason) {
+            case 'task_approved':
+                return 'approved';
+            case 'withdrawal_submitted':
+                return 'pending';
+            case 'withdrawal_approved':
+                return 'approved';
+            case 'withdrawal_rejected':
+                return 'rejected';
+            case 'withdrawal_rejected_refund':
+                return 'approved';
+            case 'admin_balance_adjustment':
+                return 'approved';
+            case 'balance_change':
+                return 'approved';
+            default:
+                return 'completed';
+        }
+    }
+
     // Notification popup methods
+
+    getTaskStatusConfig(status, deadline) {
+        switch (status) {
+            case 'available':
+                return {
+                    class: 'available',
+                    badgeClass: 'status-available',
+                    icon: '<i class="fas fa-play-circle"></i>',
+                    label: 'Available',
+                    buttonClass: 'btn-primary',
+                    buttonText: 'Start Task'
+                };
+            case 'in_progress':
+                return {
+                    class: 'in-progress',
+                    badgeClass: 'status-in-progress',
+                    icon: '<i class="fas fa-clock"></i>',
+                    label: 'In Progress',
+                    buttonClass: 'btn-success',
+                    buttonText: 'Complete Task'
+                };
+            case 'pending_review':
+                return {
+                    class: 'pending',
+                    badgeClass: 'status-pending',
+                    icon: '<i class="fas fa-hourglass-half"></i>',
+                    label: 'Pending Review',
+                    buttonClass: 'btn-warning',
+                    buttonText: 'View Details'
+                };
+            case 'approved':
+                return {
+                    class: 'approved',
+                    badgeClass: 'status-approved',
+                    icon: '<i class="fas fa-check-circle"></i>',
+                    label: 'Approved',
+                    buttonClass: 'btn-success',
+                    buttonText: 'View Details'
+                };
+            case 'rejected':
+                return {
+                    class: 'rejected',
+                    badgeClass: 'status-rejected',
+                    icon: '<i class="fas fa-times-circle"></i>',
+                    label: 'Rejected',
+                    buttonClass: 'btn-danger',
+                    buttonText: 'View Details'
+                };
+            case 'completed':
+                return {
+                    class: 'completed',
+                    badgeClass: 'status-completed',
+                    icon: '<i class="fas fa-trophy"></i>',
+                    label: 'Completed',
+                    buttonClass: 'btn-success',
+                    buttonText: 'View Details'
+                };
+            case 'expired':
+                return {
+                    class: 'expired',
+                    badgeClass: 'status-expired',
+                    icon: '<i class="fas fa-clock"></i>',
+                    label: 'Time Expired',
+                    buttonClass: 'btn-warning',
+                    buttonText: 'Start Again'
+                };
+            case 'ended':
+                return {
+                    class: 'ended',
+                    badgeClass: 'status-ended',
+                    icon: '<i class="fas fa-stop"></i>',
+                    label: 'Task Ended',
+                    buttonClass: 'btn-secondary',
+                    buttonText: 'Task Ended'
+                };
+            default:
+                return {
+                    class: 'available',
+                    badgeClass: 'status-available',
+                    icon: '<i class="fas fa-play-circle"></i>',
+                    label: 'Available',
+                    buttonClass: 'btn-primary',
+                    buttonText: 'Start Task'
+                };
+        }
+    }
+
     async openNotificationPopup() {
         console.log('🔔 Opening notification popup...');
 
@@ -4914,6 +7828,36 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 `;
             }
         }
+    }
+
+    // Global button click prevention system
+    setupGlobalButtonProtection() {
+        // Add click prevention to all buttons with onclick handlers
+        document.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button && button.classList.contains('loading')) {
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }
+
+            // Add click prevention to task cards with loading state
+            const card = e.target.closest('.task-card-modern');
+            if (card && card.classList.contains('card-loading')) {
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }
+        }, true);
+
+        // Add protection for form submissions
+        document.addEventListener('submit', (e) => {
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            if (submitBtn && submitBtn.classList.contains('loading')) {
+                e.preventDefault();
+                return false;
+            }
+        });
     }
 }
 

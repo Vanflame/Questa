@@ -160,6 +160,52 @@ USING (bucket_id = 'task-images');
         }
     }
 
+    // Upload proof image
+    async uploadProofImage(file, userId, taskId) {
+        try {
+            this.validateFile(file);
+
+            const fileName = `proofs/${userId}/${taskId}/${Date.now()}_${file.name}`;
+
+            const { data, error } = await this.client.storage
+                .from(this.bucket)
+                .upload(fileName, file, {
+                    cacheControl: '3600',
+                    upsert: false
+                });
+
+            if (error) {
+                // Check if it's an RLS policy error
+                if (error.message.includes('row-level security policy') || error.message.includes('RLS')) {
+                    console.error('Supabase RLS Policy Error:', error);
+                    console.error('🔧 QUICK FIX: Go to Supabase Dashboard → Storage → Policies');
+                    console.error('🔧 Run this SQL command:');
+                    console.error(`
+CREATE POLICY "Allow authenticated uploads" ON storage.objects
+FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'task-images');
+
+CREATE POLICY "Allow public access" ON storage.objects
+FOR SELECT TO public
+USING (bucket_id = 'task-images');
+                    `);
+                    throw new Error('Storage access denied. Please check Supabase RLS policies. See console for fix instructions.');
+                }
+                throw error;
+            }
+
+            // Get public URL
+            const { data: urlData } = this.client.storage
+                .from(this.bucket)
+                .getPublicUrl(fileName);
+
+            return urlData.publicUrl;
+        } catch (error) {
+            console.error('Error uploading proof image:', error);
+            throw new Error(`Upload failed: ${error.message}`);
+        }
+    }
+
     // Delete file
     async deleteFile(filePath) {
         try {

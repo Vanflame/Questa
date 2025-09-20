@@ -530,10 +530,14 @@ class AdminManager {
         try {
             this.showLoading(true);
 
-            await window.firestoreManager.updateWithdrawal(withdrawalId, {
-                status: 'rejected',
-                rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+            console.log('🚫 Rejecting withdrawal (admin.js):', {
+                withdrawalId: withdrawalId,
+                reason: 'Admin rejected withdrawal'
             });
+
+            await window.firestoreManager.updateWithdrawalStatus(withdrawalId, 'rejected', 'Admin rejected withdrawal');
+
+            console.log('✅ Withdrawal rejection completed (admin.js)');
 
             this.showToast('Withdrawal rejected', 'info');
             await this.loadAdminWithdrawals();

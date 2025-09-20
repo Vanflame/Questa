@@ -467,10 +467,10 @@ class AdminHandler {
                 this.loadAdminTasks();
                 break;
             case 'verifications':
-                this.loadAdminVerifications();
+                this.loadTaskSubmissions();
                 break;
             case 'withdrawals':
-                this.loadAdminWithdrawals();
+                this.loadWithdrawals();
                 break;
             case 'immutable-links':
                 this.loadImmutableLinks();
@@ -570,14 +570,20 @@ class AdminHandler {
     }
 
     async loadAdminData() {
-        await Promise.all([
-            this.loadAdminTasks(),
-            this.loadAdminVerifications(),
-            this.loadAdminWithdrawals(),
-            this.loadAdminUsers(),
-            this.loadImmutableLinks(),
-            this.loadStats()
-        ]);
+        const loadingModal = this.showLoadingModal('Loading Admin Data', 'Please wait while we fetch all admin data...');
+
+        try {
+            await Promise.all([
+                this.loadAdminTasks(),
+                this.loadAdminVerifications(),
+                this.loadAdminWithdrawals(),
+                this.loadAdminUsers(),
+                this.loadImmutableLinks(),
+                this.loadStats()
+            ]);
+        } finally {
+            this.hideLoadingModal(loadingModal);
+        }
     }
 
     toggleTimeLimitType() {
@@ -827,6 +833,8 @@ class AdminHandler {
     }
 
     async loadAdminTasks() {
+        const loadingModal = this.showLoadingModal('Loading Tasks', 'Please wait while we fetch the latest task data...');
+
         try {
             console.log('Loading admin tasks...');
 
@@ -839,7 +847,7 @@ class AdminHandler {
                 return;
             }
 
-            const tasks = await window.firestoreManager.getTasks();
+            const tasks = await window.firestoreManager.getAllTasks();
             console.log('Admin tasks loaded:', tasks);
             this.tasks = tasks || []; // Store tasks in instance variable
             this.renderAdminTasks(tasks);
@@ -848,6 +856,8 @@ class AdminHandler {
             this.showToast('Failed to load tasks: ' + error.message, 'error');
             this.tasks = []; // Ensure tasks array is always defined
             this.renderAdminTasks([]);
+        } finally {
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -991,6 +1001,8 @@ class AdminHandler {
     }
 
     async loadAdminVerifications() {
+        const loadingModal = this.showLoadingModal('Loading Verifications', 'Please wait while we fetch the latest verification data...');
+
         try {
             console.log('Loading admin verifications...');
             const verifications = await window.firestoreManager.getAllVerifications();
@@ -1001,6 +1013,8 @@ class AdminHandler {
             console.error('Error loading admin verifications:', error);
             this.showToast('Failed to load verifications', 'error');
             this.verifications = []; // Ensure verifications array is always defined
+        } finally {
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -1217,6 +1231,8 @@ class AdminHandler {
     }
 
     async loadAdminWithdrawals() {
+        const loadingModal = this.showLoadingModal('Loading Withdrawals', 'Please wait while we fetch the latest withdrawal data...');
+
         try {
             console.log('Loading admin withdrawals...');
             const withdrawals = await window.firestoreManager.getAllWithdrawals();
@@ -1227,6 +1243,8 @@ class AdminHandler {
             console.error('Error loading admin withdrawals:', error);
             this.showToast('Failed to load withdrawals', 'error');
             this.withdrawals = []; // Ensure withdrawals array is always defined
+        } finally {
+            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -1320,7 +1338,7 @@ class AdminHandler {
         modal.style.opacity = '1';
 
         modal.innerHTML = `
-            <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
+            <div class="modal-overlay" onclick="this.closest('.modal').remove()" style="cursor: pointer;"></div>
             <div class="modal-container">
                 <div class="modal-header">
                     <h3 class="modal-title">Add New Task</h3>
@@ -1555,6 +1573,14 @@ Default instructions include:
             modal.remove();
         });
 
+        // Add overlay click event listener for better modal closing
+        const overlay = modal.querySelector('.modal-overlay');
+        if (overlay) {
+            overlay.addEventListener('click', () => {
+                modal.remove();
+            });
+        }
+
         // Setup DNS configuration visibility toggle
         const dnsRadioButtons = document.querySelectorAll('input[name="require-dns-setup"]');
         const dnsConfigSection = document.getElementById('dns-config-section');
@@ -1577,8 +1603,10 @@ Default instructions include:
 
         document.getElementById('add-task-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            await this.addTask();
-            modal.remove();
+            const success = await this.addTask();
+            if (success !== false) {
+                modal.remove();
+            }
         });
     }
 
@@ -1628,15 +1656,30 @@ Default instructions include:
 
             if (!deadlineDate || !deadlineTime) {
                 this.showToast('Please set a task deadline', 'error');
-                return;
+                return false;
             }
 
             // Create deadline timestamp
             const deadline = new Date(`${deadlineDate}T${deadlineTime}`);
 
+            // Cap user time limit to never exceed task deadline
+            if (userTimeLimit) {
+                const now = new Date();
+                const remainingMinutesUntilDeadline = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60)));
+
+                // Cap user time limit to task deadline (with 1 minute buffer)
+                userTimeLimit = Math.min(userTimeLimit, Math.max(1, remainingMinutesUntilDeadline - 1));
+
+                console.log('🕐 Admin: Capped user time limit to task deadline:', {
+                    original: duration,
+                    deadlineMinutes: remainingMinutesUntilDeadline,
+                    finalUserTimeLimit: userTimeLimit
+                });
+            }
+
             if (!title || !reward || reward <= 0) {
                 this.showToast('Please fill in all required fields with valid values', 'error');
-                return;
+                return false;
             }
 
             this.showLoading(true);
@@ -1671,10 +1714,12 @@ Default instructions include:
 
             this.showToast('Task added successfully!', 'success');
             await this.loadAdminTasks();
+            return true;
 
         } catch (error) {
             console.error('Error adding task:', error);
             this.showToast('Failed to add task: ' + error.message, 'error');
+            return false;
         } finally {
             this.showLoading(false);
         }
@@ -1908,6 +1953,21 @@ Default instructions include:
             // Create deadline timestamp
             const deadline = new Date(`${deadlineDate}T${deadlineTime}`);
 
+            // Cap user time limit to never exceed task deadline
+            if (userTimeLimit) {
+                const now = new Date();
+                const remainingMinutesUntilDeadline = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60)));
+
+                // Cap user time limit to task deadline (with 1 minute buffer)
+                userTimeLimit = Math.min(userTimeLimit, Math.max(1, remainingMinutesUntilDeadline - 1));
+
+                console.log('🕐 Admin: Capped user time limit to task deadline (update):', {
+                    original: duration,
+                    deadlineMinutes: remainingMinutesUntilDeadline,
+                    finalUserTimeLimit: userTimeLimit
+                });
+            }
+
             if (!title || !reward || reward <= 0) {
                 this.showToast('Please fill in all required fields with valid values', 'error');
                 return;
@@ -1981,6 +2041,13 @@ Default instructions include:
                 return;
             }
 
+            // Find and set loading state for the approve button
+            const approveButton = document.querySelector(`[data-verification-id="${verificationId}"].approve-btn, [data-verification-id="${verificationId}"] .approve-btn`);
+            if (approveButton) {
+                this.setButtonLoading(approveButton, true, 'Approving...');
+            }
+
+            const loadingModal = this.showLoadingModal('Approving Verification', 'Please wait while we process the verification approval...');
             this.showLoading(true);
 
             // Check for Game ID mismatch if this is a final verification BEFORE approving
@@ -2049,12 +2116,25 @@ Default instructions include:
             console.error('Error approving verification:', error);
             this.showToast('Failed to approve verification: ' + error.message, 'error');
         } finally {
+            // Reset button loading state
+            const approveButton = document.querySelector(`[data-verification-id="${verificationId}"].approve-btn, [data-verification-id="${verificationId}"] .approve-btn`);
+            if (approveButton) {
+                this.setButtonLoading(approveButton, false);
+            }
+            this.hideLoadingModal(loadingModal);
             this.showLoading(false);
         }
     }
 
     async rejectVerification(verificationId) {
         try {
+            // Find and set loading state for the reject button
+            const rejectButton = document.querySelector(`[data-verification-id="${verificationId}"].reject-btn, [data-verification-id="${verificationId}"] .reject-btn`);
+            if (rejectButton) {
+                this.setButtonLoading(rejectButton, true, 'Rejecting...');
+            }
+
+            const loadingModal = this.showLoadingModal('Rejecting Verification', 'Please wait while we process the verification rejection...');
             this.showLoading(true);
 
             // Get verification details first
@@ -2117,6 +2197,12 @@ Default instructions include:
             console.error('Error rejecting verification:', error);
             this.showToast('Failed to reject verification: ' + error.message, 'error');
         } finally {
+            // Reset button loading state
+            const rejectButton = document.querySelector(`[data-verification-id="${verificationId}"].reject-btn, [data-verification-id="${verificationId}"] .reject-btn`);
+            if (rejectButton) {
+                this.setButtonLoading(rejectButton, false);
+            }
+            this.hideLoadingModal(loadingModal);
             this.showLoading(false);
         }
     }
@@ -2135,13 +2221,17 @@ Default instructions include:
                 return;
             }
 
+            // Find and set loading state for the approve withdrawal button
+            const approveButton = document.querySelector(`[data-withdrawal-id="${withdrawalId}"].approve-withdrawal-btn, [data-withdrawal-id="${withdrawalId}"] .approve-withdrawal-btn`);
+            if (approveButton) {
+                this.setButtonLoading(approveButton, true, 'Approving...');
+            }
+
+            const loadingModal = this.showLoadingModal('Approving Withdrawal', 'Please wait while we process the withdrawal approval...');
             this.showLoading(true);
 
-            // Update withdrawal status
-            await window.firestoreManager.updateWithdrawal(withdrawalId, {
-                status: 'paid',
-                paidAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            // Update withdrawal status using the proper method
+            await window.firestoreManager.updateWithdrawalStatus(withdrawalId, 'approved');
 
             // Create notification for withdrawal approval
             await window.firestoreManager.createAdminNotification(withdrawal.userId, {
@@ -2150,8 +2240,6 @@ Default instructions include:
                 message: `Your withdrawal request of ₱${withdrawal.amount} has been approved and processed. The payment has been sent to your ${withdrawal.method} account.`,
                 data: { withdrawalId: withdrawalId, amount: withdrawal.amount, method: withdrawal.method }
             });
-
-            // Note: Balance was already deducted when user created the withdrawal request
             this.showToast('Withdrawal marked as paid!', 'success');
             await this.loadAdminWithdrawals();
 
@@ -2159,6 +2247,12 @@ Default instructions include:
             console.error('Error approving withdrawal:', error);
             this.showToast('Failed to approve withdrawal: ' + error.message, 'error');
         } finally {
+            // Reset button loading state
+            const approveButton = document.querySelector(`[data-withdrawal-id="${withdrawalId}"].approve-withdrawal-btn, [data-withdrawal-id="${withdrawalId}"] .approve-withdrawal-btn`);
+            if (approveButton) {
+                this.setButtonLoading(approveButton, false);
+            }
+            this.hideLoadingModal(loadingModal);
             this.showLoading(false);
         }
     }
@@ -2171,16 +2265,17 @@ Default instructions include:
                 return;
             }
 
+            // Find and set loading state for the reject withdrawal button
+            const rejectButton = document.querySelector(`[data-withdrawal-id="${withdrawalId}"].reject-withdrawal-btn, [data-withdrawal-id="${withdrawalId}"] .reject-withdrawal-btn`);
+            if (rejectButton) {
+                this.setButtonLoading(rejectButton, true, 'Rejecting...');
+            }
+
+            const loadingModal = this.showLoadingModal('Rejecting Withdrawal', 'Please wait while we process the withdrawal rejection...');
             this.showLoading(true);
 
-            // Update withdrawal status
-            await window.firestoreManager.updateWithdrawal(withdrawalId, {
-                status: 'rejected',
-                rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            // Refund the amount back to user's wallet balance
-            await window.firestoreManager.updateWalletBalance(withdrawal.userId, withdrawal.amount);
+            // Update withdrawal status (this will handle refund logic automatically)
+            await window.firestoreManager.updateWithdrawalStatus(withdrawalId, 'rejected', 'Admin rejected withdrawal');
 
             this.showToast('Withdrawal rejected and amount refunded to user!', 'success');
             await this.loadAdminWithdrawals();
@@ -2189,6 +2284,12 @@ Default instructions include:
             console.error('Error rejecting withdrawal:', error);
             this.showToast('Failed to reject withdrawal: ' + error.message, 'error');
         } finally {
+            // Reset button loading state
+            const rejectButton = document.querySelector(`[data-withdrawal-id="${withdrawalId}"].reject-withdrawal-btn, [data-withdrawal-id="${withdrawalId}"] .reject-withdrawal-btn`);
+            if (rejectButton) {
+                this.setButtonLoading(rejectButton, false);
+            }
+            this.hideLoadingModal(loadingModal);
             this.showLoading(false);
         }
     }
@@ -2418,8 +2519,32 @@ Default instructions include:
                     break;
             }
 
-            // Update user balance
-            await window.firestoreManager.updateWalletBalance(this.currentBalanceUserId, newBalance - (user.walletBalance || 0));
+            // Update user balance with proper admin reason and metadata
+            const changeAmount = newBalance - (user.walletBalance || 0);
+            console.log('🔧 Admin balance adjustment:', {
+                userId: this.currentBalanceUserId,
+                action: action,
+                amount: amount,
+                changeAmount: changeAmount,
+                oldBalance: user.walletBalance || 0,
+                newBalance: newBalance,
+                reason: reason
+            });
+
+            await window.firestoreManager.updateWalletBalance(
+                this.currentBalanceUserId,
+                changeAmount,
+                'admin_balance_adjustment',
+                {
+                    action: action,
+                    amount: amount,
+                    oldBalance: user.walletBalance || 0,
+                    newBalance: newBalance,
+                    reason: reason,
+                    adminId: this.currentUser?.uid || 'unknown',
+                    adminEmail: this.currentUser?.email || 'unknown'
+                }
+            );
 
             // Create notification for user
             await window.firestoreManager.createAdminNotification(this.currentBalanceUserId, {
@@ -2558,14 +2683,84 @@ Default instructions include:
         });
     }
 
-    showLoading(show) {
-        const spinner = document.getElementById('loading-spinner');
-        if (show) {
-            spinner.classList.remove('hidden');
+    // Button loading state utilities
+    setButtonLoading(button, isLoading, loadingText = 'Processing...') {
+        if (!button) return;
+
+        if (isLoading) {
+            // Store original content
+            button.dataset.originalText = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = `
+                <i class="fas fa-spinner fa-spin"></i>
+                ${loadingText}
+            `;
+            button.classList.add('loading');
+
+            // Add click prevention
+            button.style.pointerEvents = 'none';
+            button.style.cursor = 'not-allowed';
         } else {
-            spinner.classList.add('hidden');
+            // Restore original content
+            if (button.dataset.originalText) {
+                button.innerHTML = button.dataset.originalText;
+                delete button.dataset.originalText;
+            }
+            button.disabled = false;
+            button.classList.remove('loading');
+
+            // Restore click functionality
+            button.style.pointerEvents = 'auto';
+            button.style.cursor = 'pointer';
         }
     }
+
+    // Show loading spinner
+    showLoading(show) {
+        const spinner = document.getElementById('loading-spinner');
+        if (spinner) {
+            if (show) {
+                spinner.classList.remove('hidden');
+            } else {
+                spinner.classList.add('hidden');
+            }
+        }
+    }
+
+    // Show toast notification
+    showToast(message, type = 'info') {
+        // Remove existing toasts
+        const existingToasts = document.querySelectorAll('.toast');
+        existingToasts.forEach(toast => toast.remove());
+
+        // Create toast element
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.innerHTML = `
+            <div class="toast-content">
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Show toast with animation
+        setTimeout(() => {
+            toast.classList.add('show');
+        }, 10);
+
+        // Auto hide after 5 seconds
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.remove();
+                }
+            }, 300);
+        }, 5000);
+    }
+
 
     // Modern loading modal functions
     showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
@@ -4252,6 +4447,351 @@ Default instructions include:
             console.error('❌ Error saving settings:', error);
             this.showToast('Failed to save settings: ' + error.message, 'error');
         }
+    }
+
+    // Enhanced Task Management
+    async createTask(taskData) {
+        try {
+            console.log('📝 Creating new task...');
+
+            const taskId = await window.firestoreManager.createTask(taskData);
+
+            this.showToast('✅ Task created successfully!', 'success');
+            await this.loadAdminTasks();
+
+            return taskId;
+        } catch (error) {
+            console.error('❌ Error creating task:', error);
+            this.showToast('Failed to create task: ' + error.message, 'error');
+            throw error;
+        }
+    }
+
+    async updateTask(taskId, taskData) {
+        try {
+            console.log('📝 Updating task...');
+
+            await window.firestoreManager.updateTask(taskId, taskData);
+
+            this.showToast('✅ Task updated successfully!', 'success');
+            await this.loadAdminTasks();
+
+        } catch (error) {
+            console.error('❌ Error updating task:', error);
+            this.showToast('Failed to update task: ' + error.message, 'error');
+            throw error;
+        }
+    }
+
+    async deleteTask(taskId) {
+        try {
+            console.log('🗑️ Deleting task...');
+
+            await window.firestoreManager.deleteTask(taskId);
+
+            this.showToast('✅ Task deleted successfully!', 'success');
+            await this.loadAdminTasks();
+
+        } catch (error) {
+            console.error('❌ Error deleting task:', error);
+            this.showToast('Failed to delete task: ' + error.message, 'error');
+            throw error;
+        }
+    }
+
+    // Task Submission Management
+    async loadTaskSubmissions() {
+        try {
+            console.log('📋 Loading task submissions...');
+
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            this.renderTaskSubmissions(submissions);
+
+        } catch (error) {
+            console.error('❌ Error loading task submissions:', error);
+            this.showToast('Failed to load submissions: ' + error.message, 'error');
+        }
+    }
+
+    renderTaskSubmissions(submissions) {
+        const container = document.getElementById('verifications-list');
+        if (!container) return;
+
+        if (submissions.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-inbox text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No Submissions</h3>
+                    <p class="text-gray-500">No task submissions to review yet.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = submissions.map(submission => `
+            <div class="submission-card">
+                <div class="submission-header">
+                    <div class="submission-info">
+                        <h4 class="submission-title">${submission.task?.title || 'Unknown Task'}</h4>
+                        <p class="submission-user">${submission.user?.email || 'Unknown User'}</p>
+                    </div>
+                    <div class="submission-status">
+                        <span class="status-badge status-${submission.status}">
+                            ${this.getStatusIcon(submission.status)} ${submission.status.replace('_', ' ').toUpperCase()}
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="submission-content">
+                    <div class="submission-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Reward:</span>
+                            <span class="detail-value">₱${submission.task?.reward || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Submitted:</span>
+                            <span class="detail-value">${new Date(submission.created_at?.toDate()).toLocaleString()}</span>
+                        </div>
+                        ${submission.restart_count > 0 ? `
+                            <div class="detail-row">
+                                <span class="detail-label">Restarts:</span>
+                                <span class="detail-value">${submission.restart_count}</span>
+                            </div>
+                        ` : ''}
+                        ${submission.referrer_email ? `
+                            <div class="detail-row">
+                                <span class="detail-label">Referrer:</span>
+                                <span class="detail-value">${submission.referrer_email}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    ${submission.proof_image_url ? `
+                        <div class="proof-section">
+                            <h5 class="proof-title">Proof Image:</h5>
+                            <img src="${submission.proof_image_url}" alt="Proof" class="proof-image" onclick="window.adminHandler.showProofModal('${submission.proof_image_url}')">
+                        </div>
+                    ` : ''}
+                    
+                    ${submission.notes ? `
+                        <div class="notes-section">
+                            <h5 class="notes-title">User Notes:</h5>
+                            <p class="notes-content">${submission.notes}</p>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <div class="submission-actions">
+                    ${submission.status === 'pending_review' ? `
+                        <button class="btn-approve" onclick="window.adminHandler.approveTaskSubmission('${submission.id}')">
+                            <i class="fas fa-check"></i>
+                            Approve
+                        </button>
+                        <button class="btn-reject" onclick="window.adminHandler.rejectTaskSubmission('${submission.id}')">
+                            <i class="fas fa-times"></i>
+                            Reject
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async approveTaskSubmission(submissionId) {
+        try {
+            console.log('✅ Approving task submission...');
+
+            await window.firestoreManager.updateTaskSubmission(submissionId, 'approved');
+
+            this.showToast('✅ Task submission approved!', 'success');
+            await this.loadTaskSubmissions();
+
+        } catch (error) {
+            console.error('❌ Error approving submission:', error);
+            this.showToast('Failed to approve submission: ' + error.message, 'error');
+        }
+    }
+
+    async rejectTaskSubmission(submissionId) {
+        const reason = prompt('Please provide a reason for rejection:');
+        if (!reason) return;
+
+        try {
+            console.log('❌ Rejecting task submission...');
+
+            await window.firestoreManager.updateTaskSubmission(submissionId, 'rejected', reason);
+
+            this.showToast('❌ Task submission rejected', 'info');
+            await this.loadTaskSubmissions();
+
+        } catch (error) {
+            console.error('❌ Error rejecting submission:', error);
+            this.showToast('Failed to reject submission: ' + error.message, 'error');
+        }
+    }
+
+    // Withdrawal Management
+    async loadWithdrawals() {
+        try {
+            console.log('💰 Loading withdrawals...');
+
+            const withdrawals = await window.firestoreManager.getWithdrawals('all');
+            this.renderWithdrawals(withdrawals);
+
+        } catch (error) {
+            console.error('❌ Error loading withdrawals:', error);
+            this.showToast('Failed to load withdrawals: ' + error.message, 'error');
+        }
+    }
+
+    renderWithdrawals(withdrawals) {
+        const container = document.getElementById('withdrawals-list');
+        if (!container) return;
+
+        if (withdrawals.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-money-bill-wave text-4xl text-gray-400 mb-4"></i>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No Withdrawals</h3>
+                    <p class="text-gray-500">No withdrawal requests to review yet.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = withdrawals.map(withdrawal => `
+            <div class="withdrawal-card">
+                <div class="withdrawal-header">
+                    <div class="withdrawal-info">
+                        <h4 class="withdrawal-user">${withdrawal.user?.email || 'Unknown User'}</h4>
+                        <p class="withdrawal-amount">₱${withdrawal.amount}</p>
+                    </div>
+                    <div class="withdrawal-status">
+                        <span class="status-badge status-${withdrawal.status}">
+                            ${this.getStatusIcon(withdrawal.status)} ${withdrawal.status.toUpperCase()}
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="withdrawal-content">
+                    <div class="withdrawal-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Method:</span>
+                            <span class="detail-value">${withdrawal.method}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Account:</span>
+                            <span class="detail-value">${withdrawal.account_details}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Requested:</span>
+                            <span class="detail-value">${new Date(withdrawal.created_at?.toDate()).toLocaleString()}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="withdrawal-actions">
+                    ${withdrawal.status === 'pending' ? `
+                        <button class="btn-approve" onclick="window.adminHandler.approveWithdrawal('${withdrawal.id}')">
+                            <i class="fas fa-check"></i>
+                            Approve
+                        </button>
+                        <button class="btn-reject" onclick="window.adminHandler.rejectWithdrawal('${withdrawal.id}')">
+                            <i class="fas fa-times"></i>
+                            Reject
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async approveWithdrawal(withdrawalId) {
+        try {
+            console.log('✅ Approving withdrawal...');
+
+            await window.firestoreManager.updateWithdrawalStatus(withdrawalId, 'approved');
+
+            this.showToast('✅ Withdrawal approved!', 'success');
+            await this.loadWithdrawals();
+
+        } catch (error) {
+            console.error('❌ Error approving withdrawal:', error);
+            this.showToast('Failed to approve withdrawal: ' + error.message, 'error');
+        }
+    }
+
+    async rejectWithdrawal(withdrawalId) {
+        const reason = prompt('Please provide a reason for rejection:');
+        if (!reason) return;
+
+        try {
+            console.log('❌ Rejecting withdrawal...');
+
+            // Get withdrawal data to restore balance
+            const withdrawalDoc = await db.collection('withdrawals').doc(withdrawalId).get();
+            if (!withdrawalDoc.exists) {
+                this.showToast('Withdrawal not found', 'error');
+                return;
+            }
+
+            const withdrawalData = withdrawalDoc.data();
+            const userId = withdrawalData.user_id || withdrawalData.userId;
+            const amount = withdrawalData.amount;
+
+            if (!userId || !amount) {
+                this.showToast('Invalid withdrawal data', 'error');
+                return;
+            }
+
+            // Update withdrawal status
+            await window.firestoreManager.updateWithdrawalStatus(withdrawalId, 'rejected', reason);
+
+            // Restore user's balance
+            await window.firestoreManager.updateWalletBalance(userId, amount);
+
+            this.showToast('❌ Withdrawal rejected and balance restored!', 'success');
+            await this.loadWithdrawals();
+
+        } catch (error) {
+            console.error('❌ Error rejecting withdrawal:', error);
+            this.showToast('Failed to reject withdrawal: ' + error.message, 'error');
+        }
+    }
+
+    // Utility Methods
+    getStatusIcon(status) {
+        const icons = {
+            'pending_review': 'fas fa-hourglass-half',
+            'approved': 'fas fa-check-circle',
+            'rejected': 'fas fa-times-circle',
+            'pending': 'fas fa-clock',
+            'paid': 'fas fa-check-circle',
+            'completed': 'fas fa-trophy'
+        };
+        return icons[status] || 'fas fa-question-circle';
+    }
+
+    showProofModal(imageUrl) {
+        // Create and show proof image modal
+        const modal = document.createElement('div');
+        modal.className = 'proof-modal';
+        modal.innerHTML = `
+            <div class="proof-modal-overlay" onclick="this.parentElement.remove()">
+                <div class="proof-modal-content" onclick="event.stopPropagation()">
+                    <div class="proof-modal-header">
+                        <h3>Proof Image</h3>
+                        <button onclick="this.closest('.proof-modal').remove()" class="close-btn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="proof-modal-body">
+                        <img src="${imageUrl}" alt="Proof" class="proof-modal-image">
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
     }
 }
 

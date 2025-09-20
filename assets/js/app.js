@@ -7,7 +7,7 @@ class TaskEarnApp {
     }
 
     async loadTasks() {
-        try {
+        return await window.loadingManager.withPageLoading(async () => {
             console.log('Loading tasks...');
 
             // Check if firestoreManager is available
@@ -20,11 +20,7 @@ class TaskEarnApp {
             console.log('Tasks loaded:', tasks);
             this.tasks = tasks || [];
             return this.tasks;
-        } catch (error) {
-            console.error('Error loading tasks:', error);
-            this.tasks = [];
-            return [];
-        }
+        }, 'Loading tasks...', 'Please wait while we load your available tasks...');
     }
 
     async renderTasks() {
@@ -63,22 +59,34 @@ class TaskEarnApp {
         const statusConfig = this.getStatusConfig(status.status);
 
         return `
-            <div class="task-card ${statusConfig.class}" onclick="window.app.openTaskDetail('${task.id}')">
-                <div class="relative">
-                    <img src="${task.banner || '/placeholder-banner.jpg'}" alt="${task.title}" class="w-full h-48 object-cover rounded-t-lg">
-                    <div class="absolute top-2 right-2">
-                        <span class="status-badge ${statusConfig.badgeClass}">
-                            ${statusConfig.icon} ${statusConfig.label}
-                        </span>
+            <div class="modern-task-card ${statusConfig.class}" onclick="window.app.openTaskDetail('${task.id}')">
+                <div class="task-card-header">
+                    <div class="task-image-container">
+                        <img src="${task.banner || '/placeholder-banner.jpg'}" alt="${task.title}" class="task-image">
+                        <div class="task-overlay">
+                            <div class="task-status-badge ${statusConfig.badgeClass}">
+                                <i class="${statusConfig.icon}"></i>
+                                <span>${statusConfig.label}</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="p-4">
-                    <h3 class="text-lg font-semibold text-gray-900 mb-2">${task.title}</h3>
-                    <div class="flex justify-between items-center">
+                <div class="task-card-content">
+                    <div class="task-title-section">
+                        <h3 class="task-title">${task.title}</h3>
+                        <p class="task-description">${task.description || 'Complete this task to earn rewards'}</p>
+                    </div>
+                    <div class="task-footer">
+                        <div class="task-reward">
+                            <i class="fas fa-coins"></i>
                         <span class="reward-amount">₱${task.reward}</span>
-                        <button class="text-blue-600 hover:text-blue-800 font-medium">
-                            ${status.status === 'locked' ? 'Start Task' : 'View Details'}
+                        </div>
+                        <div class="task-actions">
+                            <button class="task-action-btn ${status.status === 'available' ? 'primary' : 'secondary'}">
+                                <i class="${status.status === 'available' ? 'fas fa-play' : 'fas fa-eye'}"></i>
+                                <span>${status.status === 'available' ? 'Start Task' : 'View Details'}</span>
                         </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -87,40 +95,54 @@ class TaskEarnApp {
 
     getStatusConfig(status) {
         switch (status) {
-            case 'locked':
+            case 'available':
                 return {
-                    class: 'locked',
-                    badgeClass: 'status-locked',
-                    icon: '🔴',
-                    label: 'Locked'
+                    class: 'available',
+                    badgeClass: 'status-available',
+                    icon: 'fas fa-play-circle',
+                    label: 'Available'
                 };
-            case 'pending':
+            case 'in_progress':
+                return {
+                    class: 'in-progress',
+                    badgeClass: 'status-in-progress',
+                    icon: 'fas fa-clock',
+                    label: 'In Progress'
+                };
+            case 'pending_review':
                 return {
                     class: 'pending',
                     badgeClass: 'status-pending',
-                    icon: '🟡',
-                    label: 'Pending'
+                    icon: 'fas fa-hourglass-half',
+                    label: 'Pending Review'
                 };
-            case 'complete':
+            case 'approved':
                 return {
-                    class: 'complete',
-                    badgeClass: 'status-complete',
-                    icon: '🟢',
-                    label: 'Complete'
+                    class: 'approved',
+                    badgeClass: 'status-approved',
+                    icon: 'fas fa-check-circle',
+                    label: 'Approved'
                 };
-            case 'unlocked':
+            case 'rejected':
                 return {
-                    class: '',
-                    badgeClass: 'status-pending',
-                    icon: '🟡',
-                    label: 'Available'
+                    class: 'rejected',
+                    badgeClass: 'status-rejected',
+                    icon: 'fas fa-times-circle',
+                    label: 'Rejected'
+                };
+            case 'completed':
+                return {
+                    class: 'completed',
+                    badgeClass: 'status-completed',
+                    icon: 'fas fa-trophy',
+                    label: 'Completed'
                 };
             default:
                 return {
-                    class: 'locked',
-                    badgeClass: 'status-locked',
-                    icon: '🔴',
-                    label: 'Locked'
+                    class: 'available',
+                    badgeClass: 'status-available',
+                    icon: 'fas fa-play-circle',
+                    label: 'Available'
                 };
         }
     }
@@ -153,285 +175,283 @@ class TaskEarnApp {
     }
 
     createTaskModalContent(task, status) {
-        if (status.status === 'locked') {
-            return this.createAndroidVersionCheck(task);
-        } else if (status.status === 'pending' && status.phase === 'initial') {
-            return this.createPendingInitialStatus(task, status);
-        } else if (status.status === 'unlocked' || status.status === 'complete') {
-            return this.createTaskInstructions(task, status);
-        } else if (status.status === 'pending' && status.phase === 'final') {
-            return this.createPendingFinalStatus(task, status);
+        if (status.status === 'available') {
+            return this.createTaskStartForm(task, status);
+        } else if (status.status === 'in_progress') {
+            return this.createTaskInProgress(task, status);
+        } else if (status.status === 'pending_review') {
+            return this.createPendingReviewStatus(task, status);
+        } else if (status.status === 'approved') {
+            return this.createTaskCompleted(task, status);
+        } else if (status.status === 'rejected') {
+            return this.createTaskRejected(task, status);
+        } else if (status.status === 'completed') {
+            return this.createTaskCompleted(task, status);
+        } else if (status.status === 'expired') {
+            return this.createTaskExpired(task, status);
+        } else if (status.status === 'ended') {
+            return this.createTaskEnded(task, status);
         }
     }
 
-    createAndroidVersionCheck(task) {
-        // Directly proceed to initial verification since Android version will be captured there
-        this.showInitialVerification(task.id);
-        return '';
-    }
+    createTaskStartForm(task, status) {
+        const referrerEmailRequired = task.requires_referrer_email || false;
+        const restartCount = status.restart_count || 0;
+        const maxRestarts = task.max_restarts || 3;
 
-    createPendingInitialStatus(task, status) {
         return `
-            <div class="verification-phase pending">
-                <div class="flex items-center mb-4">
-                    <i class="fas fa-clock text-yellow-500 mr-2"></i>
-                    <h4 class="font-semibold text-gray-900">Initial Verification Pending</h4>
-                </div>
-                <p class="text-gray-600 mb-4">
-                    Your initial verification is being reviewed. You'll be notified once it's approved.
-                </p>
-                <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                    <p class="text-sm text-yellow-800">
-                        <strong>Status:</strong> Pending approval<br>
-                        <strong>Submitted:</strong> ${new Date(status.createdAt?.toDate()).toLocaleString()}
-                    </p>
-                </div>
-                <div class="mt-4">
-                    <button onclick="window.app.closeTaskModal()" class="btn-secondary">
-                        Close
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
-    createTaskInstructions(task, status) {
-        return `
-            <div class="space-y-6">
-                <div class="verification-phase completed">
-                    <div class="flex items-center mb-4">
-                        <i class="fas fa-check-circle text-green-500 mr-2"></i>
-                        <h4 class="font-semibold text-gray-900">Initial Verification Approved</h4>
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-reward-badge">
+                            <i class="fas fa-coins"></i>
+                            <span>₱${task.reward}</span>
+                        </div>
                     </div>
-                    <p class="text-gray-600">Great! You can now proceed with the task.</p>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                    <h4 class="font-semibold text-gray-900 mb-4">Task Instructions</h4>
-                    <ol class="list-decimal list-inside space-y-2 text-gray-700">
-                        <li>Activate DNS settings on your device</li>
-                        <li>Copy the Immutable link provided below</li>
-                        <li>Complete Stage 0–18 in the game</li>
-                        <li>Take a screenshot showing your progress</li>
-                    </ol>
-                </div>
-
-                ${status.status !== 'complete' ? this.createFinalVerificationForm(task) : this.createCompletedStatus(task)}
-            </div>
-        `;
-    }
-
-    createFinalVerificationForm(task) {
-        return `
-            <div class="verification-phase">
-                <h4 class="font-semibold text-gray-900 mb-4">Final Verification</h4>
-                <form id="final-verification-form" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Game ID</label>
-                        <input type="text" id="final-game-id" required class="form-input" placeholder="Enter your Game ID">
+                <div class="task-detail-content">
+                    <div class="task-instructions">
+                        <h4 class="section-title">
+                            <i class="fas fa-list-ol"></i>
+                            Task Instructions
+                        </h4>
+                        <div class="instructions-content">
+                            ${task.instructions ? task.instructions.split('\n').map(instruction =>
+            `<div class="instruction-item">${instruction}</div>`
+        ).join('') : '<p>Follow the task requirements to complete and earn your reward.</p>'}
+                        </div>
                     </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Stage 0-18 Screenshot</label>
-                        <div id="stage-upload-area" class="image-upload">
-                            <input type="file" id="stage-screenshot" accept="image/*" class="hidden">
-                            <div id="stage-upload-content">
-                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
-                                <p class="text-gray-600">Click to upload screenshot</p>
-                                <p class="text-xs text-gray-500">JPEG, PNG, WebP up to 5MB</p>
+
+                    ${restartCount > 0 ? `
+                        <div class="restart-info">
+                            <div class="restart-stats">
+                                <div class="restart-item">
+                                    <i class="fas fa-redo"></i>
+                                    <span>Restarts: ${restartCount}/${maxRestarts}</span>
+                                </div>
                             </div>
                         </div>
-                        <div id="stage-preview" class="file-preview hidden"></div>
+                    ` : ''}
+
+                    <div class="task-actions-section">
+                        ${referrerEmailRequired ? `
+                            <div class="referrer-email-section">
+                                <label class="form-label">
+                                    <i class="fas fa-envelope"></i>
+                                    Referrer Email (Required)
+                                </label>
+                                <input type="email" id="referrer-email" class="form-input" 
+                                       placeholder="Enter referrer email address" required>
+                                <small class="form-help">This task requires a referrer email to proceed</small>
+                </div>
+                        ` : ''}
+
+                        <div class="modal-actions">
+                            <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                Cancel
+                            </button>
+                            <button type="button" onclick="window.app.startTask('${task.id}')" class="btn-primary">
+                                <i class="fas fa-play"></i>
+                                Start Task
+                    </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+
+    createTaskInProgress(task, status) {
+        return `
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-in-progress">
+                            <i class="fas fa-clock"></i>
+                            <span>In Progress</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="task-detail-content">
+                    <div class="task-instructions">
+                        <h4 class="section-title">
+                            <i class="fas fa-list-ol"></i>
+                            Task Instructions
+                        </h4>
+                        <div class="instructions-content">
+                            ${task.instructions ? task.instructions.split('\n').map(instruction =>
+            `<div class="instruction-item">${instruction}</div>`
+        ).join('') : '<p>Follow the task requirements to complete and earn your reward.</p>'}
+                        </div>
                     </div>
 
-                    <div class="flex space-x-4">
-                        <button type="submit" class="btn-primary">
-                            Submit Final Verification
-                        </button>
-                        <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
-                            Cancel
-                        </button>
+                    <div class="task-actions-section">
+                        <div class="modal-actions">
+                            <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                Close
+                            </button>
+                            <button type="button" onclick="window.app.submitTaskProof('${task.id}')" class="btn-primary">
+                                <i class="fas fa-upload"></i>
+                                Submit Proof
+                            </button>
+                        </div>
                     </div>
-                </form>
+                </div>
             </div>
         `;
     }
 
-    createCompletedStatus(task) {
+    createPendingReviewStatus(task, status) {
         return `
-            <div class="verification-phase completed">
-                <div class="flex items-center mb-4">
-                    <i class="fas fa-check-circle text-green-500 mr-2"></i>
-                    <h4 class="font-semibold text-gray-900">Task Completed!</h4>
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-pending">
+                            <i class="fas fa-hourglass-half"></i>
+                            <span>Pending Review</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="bg-green-50 border border-green-200 rounded-md p-4">
-                    <p class="text-green-800 mb-2">
-                        <strong>Congratulations!</strong> You have successfully completed this task.
-                    </p>
-                    <p class="text-green-700">
-                        <strong>Reward Earned:</strong> ₱${task.reward}
-                    </p>
-                </div>
-                <div class="mt-4">
-                    <button onclick="window.app.closeTaskModal()" class="btn-secondary">
-                        Close
-                    </button>
-                </div>
-            </div>
-        `;
-    }
 
-    createPendingFinalStatus(task, status) {
-        return `
-            <div class="verification-phase pending">
-                <div class="flex items-center mb-4">
-                    <i class="fas fa-clock text-yellow-500 mr-2"></i>
-                    <h4 class="font-semibold text-gray-900">Final Verification Pending</h4>
-                </div>
-                <p class="text-gray-600 mb-4">
-                    Your final verification is being reviewed. You'll receive your reward once approved.
-                </p>
-                <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                    <p class="text-sm text-yellow-800">
-                        <strong>Status:</strong> Pending approval<br>
-                        <strong>Reward:</strong> ₱${task.reward}<br>
-                        <strong>Submitted:</strong> ${new Date(status.createdAt?.toDate()).toLocaleString()}
-                    </p>
-                </div>
-                <div class="mt-4">
-                    <button onclick="window.app.closeTaskModal()" class="btn-secondary">
-                        Close
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
-
-    showInitialVerification(taskId) {
-        const task = this.tasks.find(t => t.id === taskId);
-        if (!task) return;
-
-        const content = document.getElementById('task-modal-content');
-        content.innerHTML = `
-            <div class="verification-phase">
-                <h4 class="font-semibold text-gray-900 mb-4">Initial Verification</h4>
-                <p class="text-gray-600 mb-4">
-                    Please provide your Game ID, Android version, and upload a profile screenshot showing your Game ID.
-                </p>
-                
-                <form id="initial-verification-form" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Game ID</label>
-                        <input type="text" id="initial-game-id" required class="form-input" placeholder="Enter your Game ID">
+                <div class="task-detail-content">
+                    <div class="pending-review-info">
+                        <div class="info-card">
+                            <i class="fas fa-clock"></i>
+                            <div class="info-content">
+                                <h4>Submission Under Review</h4>
+                                <p>Your task submission is being reviewed by our team. You'll be notified once the review is complete.</p>
+                            </div>
                     </div>
                     
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Profile Screenshot</label>
-                        <div id="profile-upload-area" class="image-upload">
-                            <input type="file" id="profile-screenshot" accept="image/*" class="hidden">
-                            <div id="profile-upload-content">
-                                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
-                                <p class="text-gray-600">Click to upload screenshot</p>
-                                <p class="text-xs text-gray-500">Must show Game ID in profile</p>
+                        <div class="submission-details">
+                            <div class="detail-item">
+                                <span class="detail-label">Submitted:</span>
+                                <span class="detail-value">${new Date(status.created_at?.toDate()).toLocaleString()}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Reward:</span>
+                                <span class="detail-value">₱${task.reward}</span>
                             </div>
                         </div>
-                        <div id="profile-preview" class="file-preview hidden"></div>
                     </div>
 
-                    <div class="flex space-x-4">
-                        <button type="submit" class="btn-primary">
-                            Submit Initial Verification
-                        </button>
+                    <div class="modal-actions">
                         <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
-                            Cancel
+                            <i class="fas fa-times"></i>
+                            Close
                         </button>
                     </div>
-                </form>
+                </div>
             </div>
         `;
-
-        // Setup form handlers
-        this.setupInitialVerificationHandlers(taskId, androidVersion);
     }
 
-    setupInitialVerificationHandlers(taskId, androidVersion) {
-        // File upload handlers
-        const profileUploadArea = document.getElementById('profile-upload-area');
-        const profileInput = document.getElementById('profile-screenshot');
-        const profilePreview = document.getElementById('profile-preview');
+    createTaskCompleted(task, status) {
+        return `
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-completed">
+                            <i class="fas fa-trophy"></i>
+                            <span>Completed</span>
+                        </div>
+                    </div>
+                </div>
 
-        profileUploadArea.addEventListener('click', () => profileInput.click());
+                <div class="task-detail-content">
+                    <div class="completion-success">
+                        <div class="success-card">
+                            <i class="fas fa-check-circle"></i>
+                            <div class="success-content">
+                                <h4>Task Completed Successfully!</h4>
+                                <p>Congratulations! You have successfully completed this task and earned your reward.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="reward-details">
+                            <div class="reward-item">
+                                <i class="fas fa-coins"></i>
+                                <span class="reward-amount">₱${task.reward}</span>
+                                <span class="reward-label">Earned</span>
+                            </div>
+                        </div>
+                </div>
 
-        profileInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            try {
-                window.storageManager.validateImageFile(file);
-                const preview = await window.storageManager.createImagePreview(file);
-
-                profilePreview.innerHTML = `
-                    <img src="${preview}" alt="Preview" class="max-w-full h-auto rounded-md">
-                    <p class="text-sm text-gray-600 mt-2">${file.name} (${window.storageManager.formatFileSize(file.size)})</p>
-                `;
-                profilePreview.classList.remove('hidden');
-                profileUploadArea.classList.add('has-image');
-            } catch (error) {
-                this.showToast(error.message, 'error');
-            }
-        });
-
-        // Form submission
-        document.getElementById('initial-verification-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await this.submitInitialVerification(taskId, androidVersion);
-        });
+                    <div class="modal-actions">
+                        <button type="button" onclick="window.app.closeTaskModal()" class="btn-primary">
+                            <i class="fas fa-check"></i>
+                        Close
+                    </button>
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
-    async submitInitialVerification(taskId, androidVersion) {
-        try {
-            const currentUser = window.authManager?.getCurrentUser();
-            if (!currentUser) return;
+    createTaskRejected(task, status) {
+        const restartCount = status.restart_count || 0;
+        const maxRestarts = task.max_restarts || 3;
+        const canRestart = restartCount < maxRestarts;
 
-            const gameId = document.getElementById('initial-game-id').value;
-            const profileFile = document.getElementById('profile-screenshot').files[0];
+        return `
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-rejected">
+                            <i class="fas fa-times-circle"></i>
+                            <span>Rejected</span>
+                        </div>
+                    </div>
+                </div>
 
-            if (!gameId || !profileFile) {
-                this.showToast('Please fill in all fields', 'error');
-                return;
-            }
+                <div class="task-detail-content">
+                    <div class="rejection-info">
+                        <div class="rejection-card">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <div class="rejection-content">
+                                <h4>Task Submission Rejected</h4>
+                                <p>Your submission did not meet the requirements. ${status.admin_notes || 'Please review the instructions and try again.'}</p>
+                            </div>
+                    </div>
+                    
+                        <div class="restart-info">
+                            <div class="restart-stats">
+                                <div class="restart-item">
+                                    <i class="fas fa-redo"></i>
+                                    <span>Restarts: ${restartCount}/${maxRestarts}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-            this.showLoading(true);
-
-            // Upload profile screenshot
-            const profileScreenshot = await window.storageManager.uploadProfileScreenshot(
-                profileFile, currentUser.uid, taskId
-            );
-
-            // Create verification record
-            await window.firestoreManager.createVerification({
-                userId: currentUser.uid,
-                taskId: taskId,
-                gameId: gameId,
-                androidVersion: androidVersion,
-                profileScreenshot: profileScreenshot,
-                phase: 'initial'
-            });
-
-            this.showToast('Initial verification submitted successfully!', 'success');
-            this.closeTaskModal();
-
-            // Refresh tasks to update status
-            await this.loadTasks();
-
-        } catch (error) {
-            console.error('Error submitting initial verification:', error);
-            this.showToast('Failed to submit verification: ' + error.message, 'error');
-        } finally {
-            this.showLoading(false);
-        }
+                    <div class="modal-actions">
+                        <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                            <i class="fas fa-times"></i>
+                        Close
+                    </button>
+                        ${canRestart ? `
+                            <button type="button" onclick="window.app.restartTask('${task.id}')" class="btn-primary">
+                                <i class="fas fa-redo"></i>
+                                Restart Task
+                        </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
     }
+
+
 
     closeTaskModal() {
         const modal = document.getElementById('task-modal');
@@ -440,16 +460,7 @@ class TaskEarnApp {
         }
     }
 
-    showLoading(show) {
-        const spinner = document.getElementById('loading-spinner');
-        if (spinner) {
-            if (show) {
-                spinner.classList.remove('hidden');
-            } else {
-                spinner.classList.add('hidden');
-            }
-        }
-    }
+    // showLoading method removed - now using LoadingManager
 
     showToast(message, type = 'info') {
         // Remove existing toasts
@@ -467,6 +478,441 @@ class TaskEarnApp {
         setTimeout(() => {
             toast.remove();
         }, 5000);
+    }
+
+    // Enhanced Task Management Methods
+    async startTask(taskId) {
+        try {
+            const currentUser = window.authManager?.getCurrentUser();
+            if (!currentUser) return;
+
+            const task = this.tasks.find(t => t.id === taskId);
+            if (!task) return;
+
+            // Check if referrer email is required
+            if (task.requires_referrer_email) {
+                // Try task-specific ID first, then fallback to generic ID
+                let referrerElement = document.getElementById(`referrer-email-${task.id}`) || document.getElementById('referrer-email');
+                const referrerEmail = referrerElement ? referrerElement.value.trim() : null;
+
+                console.log('📧 Referrer email validation (app.js):', {
+                    requiresReferrer: task.requires_referrer_email,
+                    taskId: task.id,
+                    elementId: `referrer-email-${task.id}`,
+                    genericElementId: 'referrer-email',
+                    elementExists: !!referrerElement,
+                    elementValue: referrerElement ? referrerElement.value : 'Element not found',
+                    trimmedValue: referrerEmail
+                });
+
+                if (!referrerEmail) {
+                    this.showToast('Referrer email is required for this task', 'error');
+                    return;
+                }
+            }
+
+            // Use LoadingManager for task operations
+            const loadingId = window.loadingManager.showTaskLoading('Starting Task', 'Please wait while we start your task...');
+
+            // Create task submission
+            const submissionData = {
+                task_id: taskId,
+                user_id: currentUser.uid,
+                status: 'in_progress',
+                restart_count: 0,
+                referrer_email: task.requires_referrer_email ? (document.getElementById(`referrer-email-${task.id}`) || document.getElementById('referrer-email'))?.value?.trim() : null
+            };
+
+            const result = await window.firestoreManager.createTaskSubmission(submissionData);
+
+            this.showToast(`Task started successfully! Reference: ${result.referenceNumber}`, 'success');
+            this.closeTaskModal();
+
+            // Refresh tasks to update status
+            await this.loadTasks();
+            await this.renderTasks();
+
+        } catch (error) {
+            console.error('Error starting task:', error);
+            this.showToast('Failed to start task: ' + error.message, 'error');
+        } finally {
+            window.loadingManager.hideLoading(loadingId);
+        }
+    }
+
+    async submitTaskProof(taskId) {
+        try {
+            const currentUser = window.authManager?.getCurrentUser();
+            if (!currentUser) return;
+
+            // Show proof submission modal
+            this.showProofSubmissionModal(taskId);
+
+        } catch (error) {
+            console.error('Error submitting task proof:', error);
+            this.showToast('Failed to submit proof: ' + error.message, 'error');
+        }
+    }
+
+    showProofSubmissionModal(taskId) {
+        const task = this.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const modal = document.getElementById('task-modal');
+        const title = document.getElementById('task-modal-title');
+        const content = document.getElementById('task-modal-content');
+
+        if (!modal || !title || !content) return;
+
+        title.textContent = 'Submit Task Proof';
+        content.innerHTML = `
+            <div class="proof-submission-modal">
+                <div class="proof-form">
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-image"></i>
+                            Proof Image
+                        </label>
+                        <div class="image-upload-area" id="proof-upload-area">
+                            <input type="file" id="proof-image" accept="image/*" class="hidden">
+                            <div id="proof-upload-content">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <p>Click to upload proof image</p>
+                                <small>JPEG, PNG, WebP up to 5MB</small>
+                            </div>
+                        </div>
+                        <div id="proof-preview" class="image-preview hidden"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i class="fas fa-comment"></i>
+                            Additional Notes (Optional)
+                        </label>
+                        <textarea id="proof-notes" class="form-textarea" 
+                                  placeholder="Add any additional notes about your submission..."></textarea>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                            <i class="fas fa-times"></i>
+                            Cancel
+                        </button>
+                        <button type="button" onclick="window.app.submitProofForm('${taskId}')" class="btn-primary">
+                            <i class="fas fa-paper-plane"></i>
+                            Submit Proof
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Setup file upload handlers
+        this.setupProofUploadHandlers();
+
+        modal.classList.remove('hidden');
+    }
+
+    setupProofUploadHandlers() {
+        const uploadArea = document.getElementById('proof-upload-area');
+        const fileInput = document.getElementById('proof-image');
+        const preview = document.getElementById('proof-preview');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                // Validate file
+                if (file.size > 5 * 1024 * 1024) {
+                    throw new Error('File size must be less than 5MB');
+                }
+
+                if (!file.type.startsWith('image/')) {
+                    throw new Error('Please select an image file');
+                }
+
+                // Create preview
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    preview.innerHTML = `
+                        <img src="${e.target.result}" alt="Proof Preview" class="preview-image">
+                        <p class="preview-filename">${file.name}</p>
+                    `;
+                    preview.classList.remove('hidden');
+                    uploadArea.classList.add('has-image');
+                };
+                reader.readAsDataURL(file);
+
+            } catch (error) {
+                this.showToast(error.message, 'error');
+            }
+        });
+    }
+
+    async submitProofForm(taskId) {
+        try {
+            const currentUser = window.authManager?.getCurrentUser();
+            if (!currentUser) return;
+
+            const fileInput = document.getElementById('proof-image');
+            const notes = document.getElementById('proof-notes')?.value || '';
+
+            if (!fileInput.files[0]) {
+                this.showToast('Please select a proof image', 'error');
+                return;
+            }
+
+            const loadingId = window.loadingManager.showTaskLoading('Submitting Proof', 'Please wait while we upload your proof...');
+
+            // Upload proof image
+            const proofImageUrl = await window.storageManager.uploadProofImage(
+                fileInput.files[0],
+                currentUser.uid,
+                taskId
+            );
+
+            // Update task submission
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === currentUser.uid && s.status === 'in_progress'
+            );
+
+            if (userSubmission) {
+                await window.firestoreManager.updateTaskSubmission(userSubmission.id, 'pending_review', {
+                    proof_image_url: proofImageUrl,
+                    notes: notes
+                });
+            }
+
+            this.showToast('Proof submitted successfully!', 'success');
+            this.closeTaskModal();
+
+            // Refresh tasks
+            await this.loadTasks();
+            await this.renderTasks();
+
+        } catch (error) {
+            console.error('Error submitting proof:', error);
+            this.showToast('Failed to submit proof: ' + error.message, 'error');
+        } finally {
+            window.loadingManager.hideLoading(loadingId);
+        }
+    }
+
+    createTaskExpired(task, status) {
+        const referrerEmailRequired = task.requires_referrer_email || false;
+        const restartCount = status.restart_count || 0;
+        const maxRestarts = task.max_restarts || 3;
+
+        return `
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-expired">
+                            <i class="fas fa-clock"></i>
+                            <span>Time Expired</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="task-detail-content">
+                    <div class="task-instructions">
+                        <h4 class="section-title">
+                            <i class="fas fa-list-ol"></i>
+                            Task Instructions
+                        </h4>
+                        <div class="instructions-content">
+                            ${task.instructions ? task.instructions.split('\n').map(instruction =>
+            `<div class="instruction-item">${instruction}</div>`
+        ).join('') : '<p>Follow the task requirements to complete and earn your reward.</p>'}
+                        </div>
+                    </div>
+
+                    <div class="expired-info">
+                        <div class="expired-notice">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <p>Your time limit for this task has expired. You can restart the task to begin again with a fresh timer.</p>
+                        </div>
+                    </div>
+
+                    ${restartCount > 0 ? `
+                        <div class="restart-info">
+                            <div class="restart-stats">
+                                <div class="restart-item">
+                                    <i class="fas fa-redo"></i>
+                                    <span>Previous Restarts: ${restartCount}/${maxRestarts}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <div class="task-actions-section">
+                        ${referrerEmailRequired ? `
+                            <div class="referrer-email-section">
+                                <label class="form-label">
+                                    <i class="fas fa-envelope"></i>
+                                    Referrer Email (Required)
+                                </label>
+                                <input type="email" id="referrer-email-restart" class="form-input" 
+                                       placeholder="Enter referrer email address" required>
+                                <small class="form-help">This task requires a referrer email to restart</small>
+                            </div>
+                        ` : ''}
+
+                        <div class="modal-actions">
+                            <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                Cancel
+                            </button>
+                            <button type="button" onclick="window.app.restartExpiredTask('${task.id}')" class="btn-warning">
+                                <i class="fas fa-redo"></i>
+                                Start Again
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    createTaskEnded(task, status) {
+        return `
+            <div class="task-detail-modal">
+                <div class="task-detail-header">
+                    <div class="task-detail-title">
+                        <h3 class="modal-title">${task.title}</h3>
+                        <div class="task-status-badge status-ended">
+                            <i class="fas fa-stop"></i>
+                            <span>Task Ended</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="task-detail-content">
+                    <div class="task-instructions">
+                        <h4 class="section-title">
+                            <i class="fas fa-list-ol"></i>
+                            Task Instructions
+                        </h4>
+                        <div class="instructions-content">
+                            ${task.instructions ? task.instructions.split('\n').map(instruction =>
+            `<div class="instruction-item">${instruction}</div>`
+        ).join('') : '<p>Follow the task requirements to complete and earn your reward.</p>'}
+                        </div>
+                    </div>
+
+                    <div class="ended-info">
+                        <div class="ended-notice">
+                            <i class="fas fa-ban"></i>
+                            <p>This task has ended and is no longer available for completion. The deadline has passed.</p>
+                        </div>
+                    </div>
+
+                    <div class="task-actions-section">
+                        <div class="modal-actions">
+                            <button type="button" onclick="window.app.closeTaskModal()" class="btn-secondary">
+                                <i class="fas fa-times"></i>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async restartExpiredTask(taskId) {
+        try {
+            const currentUser = window.authManager?.getCurrentUser();
+            if (!currentUser) return;
+
+            // Check if referrer email is required
+            const task = this.tasks.find(t => t.id === taskId);
+            if (task && task.requires_referrer_email) {
+                const referrerEmail = document.getElementById('referrer-email-restart')?.value;
+                if (!referrerEmail || !referrerEmail.trim()) {
+                    this.showToast('Referrer email is required to restart this task', 'error');
+                    return;
+                }
+            }
+
+            const loadingId = window.loadingManager.showTaskLoading('Restarting Task', 'Please wait while we restart your task...');
+
+            // Get current submission to get restart count and referrer email
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === currentUser.uid
+            );
+
+            // Create a NEW submission instead of updating the existing one
+            // This preserves all previous verification data
+            const submissionData = {
+                task_id: taskId,
+                user_id: currentUser.uid,
+                status: 'in_progress',
+                restart_count: userSubmission ? (userSubmission.restart_count || 0) + 1 : 1,
+                referrer_email: task.requires_referrer_email ? document.getElementById('referrer-email-restart')?.value : (userSubmission ? userSubmission.referrer_email : null)
+            };
+
+            const result = await window.firestoreManager.createTaskSubmission(submissionData);
+
+            this.showToast(`Task restarted successfully! New Reference: ${result.referenceNumber}`, 'success');
+            this.closeTaskModal();
+
+            // Refresh tasks
+            await this.loadTasks();
+            await this.renderTasks();
+
+        } catch (error) {
+            console.error('Error restarting expired task:', error);
+            this.showToast('Failed to restart task: ' + error.message, 'error');
+        } finally {
+            window.loadingManager.hideLoading(loadingId);
+        }
+    }
+
+    async restartTask(taskId) {
+        try {
+            const currentUser = window.authManager?.getCurrentUser();
+            if (!currentUser) return;
+
+            const loadingId = window.loadingManager.showTaskLoading('Restarting Task', 'Please wait while we restart your task...');
+
+            // Get current submission to get restart count and referrer email
+            const submissions = await window.firestoreManager.getTaskSubmissions('all');
+            const userSubmission = submissions.find(s =>
+                s.task_id === taskId && s.user_id === currentUser.uid
+            );
+
+            // Create a NEW submission instead of updating the existing one
+            // This preserves all previous verification data
+            const submissionData = {
+                task_id: taskId,
+                user_id: currentUser.uid,
+                status: 'in_progress',
+                restart_count: userSubmission ? (userSubmission.restart_count || 0) + 1 : 1,
+                referrer_email: userSubmission ? userSubmission.referrer_email : null
+            };
+
+            const result = await window.firestoreManager.createTaskSubmission(submissionData);
+
+            this.showToast(`Task restarted successfully! New Reference: ${result.referenceNumber}`, 'success');
+            this.closeTaskModal();
+
+            // Refresh tasks
+            await this.loadTasks();
+            await this.renderTasks();
+
+        } catch (error) {
+            console.error('Error restarting task:', error);
+            this.showToast('Failed to restart task: ' + error.message, 'error');
+        } finally {
+            window.loadingManager.hideLoading(loadingId);
+        }
     }
 }
 

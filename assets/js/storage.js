@@ -1,104 +1,142 @@
-// Firebase Storage Module (Legacy - now using Supabase)
+// ImgBB Storage Manager
 class StorageManager {
     constructor() {
-        // This is now a legacy class - Supabase is used instead
-        console.log('StorageManager initialized (legacy mode - using Supabase)');
+        this.imgbbApiKey = window.CONFIG?.IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY';
+        this.maxFileSize = window.CONFIG?.MAX_FILE_SIZE || 5 * 1024 * 1024;
+        this.allowedTypes = window.CONFIG?.ALLOWED_FILE_TYPES || ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     }
 
-    // Upload profile screenshot (redirects to Supabase)
+    // Validate file before upload
+    validateFile(file) {
+        if (!file) {
+            throw new Error('No file provided');
+        }
+
+        if (file.size > this.maxFileSize) {
+            throw new Error(`File size must be less than ${this.maxFileSize / (1024 * 1024)}MB`);
+        }
+
+        if (!this.allowedTypes.includes(file.type)) {
+            throw new Error('Only JPEG, PNG, WebP, and GIF images are allowed');
+        }
+
+        return true;
+    }
+
+    // Upload image to ImgBB
+    async uploadToImgBB(file, filename = null) {
+        try {
+            this.validateFile(file);
+
+            const formData = new FormData();
+            formData.append('image', file);
+            if (filename) {
+                formData.append('name', filename);
+            }
+
+            const response = await fetch(`https://api.imgbb.com/1/upload?key=${this.imgbbApiKey}`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Upload failed');
+            }
+
+            return {
+                url: result.data.url,
+                deleteUrl: result.data.delete_url,
+                id: result.data.id
+            };
+        } catch (error) {
+            console.error('Error uploading to ImgBB:', error);
+            throw new Error(`Upload failed: ${error.message}`);
+        }
+    }
+
+    // Upload profile screenshot
     async uploadProfileScreenshot(file, userId, taskId) {
         try {
-            // Redirect to Supabase Storage Manager
-            if (window.supabaseStorageManager) {
-                return await window.supabaseStorageManager.uploadProfileScreenshot(file, userId, taskId);
-            } else {
-                throw new Error('Supabase Storage Manager not available');
-            }
+            const filename = `profile_${userId}_${taskId}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
         } catch (error) {
             console.error('Error uploading profile screenshot:', error);
             throw error;
         }
     }
 
-    // Upload stage screenshot (redirects to Supabase)
+    // Upload stage screenshot
     async uploadStageScreenshot(file, userId, taskId) {
         try {
-            if (window.supabaseStorageManager) {
-                return await window.supabaseStorageManager.uploadStageScreenshot(file, userId, taskId);
-            } else {
-                throw new Error('Supabase Storage Manager not available');
-            }
+            const filename = `stage_${userId}_${taskId}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
         } catch (error) {
             console.error('Error uploading stage screenshot:', error);
             throw error;
         }
     }
 
-    // Upload task banner image (redirects to Supabase)
+    // Upload task banner image
     async uploadTaskBanner(file, taskId) {
         try {
-            if (window.supabaseStorageManager) {
-                return await window.supabaseStorageManager.uploadTaskBanner(file, taskId);
-            } else {
-                throw new Error('Supabase Storage Manager not available');
-            }
+            const filename = `banner_${taskId}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
         } catch (error) {
             console.error('Error uploading task banner:', error);
             throw error;
         }
     }
 
-    // Generic file upload (redirects to Supabase)
+    // Upload verification image
+    async uploadVerificationImage(file, userId, taskId, phase) {
+        try {
+            const filename = `verification_${phase}_${userId}_${taskId}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
+        } catch (error) {
+            console.error('Error uploading verification image:', error);
+            throw error;
+        }
+    }
+
+    // Upload proof image
+    async uploadProofImage(file, userId, taskId) {
+        try {
+            const filename = `proof_${userId}_${taskId}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
+        } catch (error) {
+            console.error('Error uploading proof image:', error);
+            throw error;
+        }
+    }
+
+    // Generic file upload
     async uploadFile(file, path) {
         try {
-            if (window.supabaseStorageManager) {
-                // Extract components from path for Supabase
-                const pathParts = path.split('/');
-                if (pathParts.length >= 3) {
-                    const phase = pathParts[1]; // e.g., 'verifications'
-                    const userId = pathParts[2]; // user ID
-                    const taskId = pathParts[3]; // task ID
-                    return await window.supabaseStorageManager.uploadVerificationImage(file, userId, taskId, phase);
-                } else {
-                    throw new Error('Invalid file path format');
-                }
-            } else {
-                throw new Error('Supabase Storage Manager not available');
-            }
+            const filename = `file_${path.replace(/\//g, '_')}_${Date.now()}`;
+            const result = await this.uploadToImgBB(file, filename);
+            return result.url;
         } catch (error) {
             console.error('Error uploading file:', error);
             throw error;
         }
     }
 
-    // Delete file (redirects to Supabase)
+    // Delete file (ImgBB doesn't support deletion via API)
     async deleteFile(filePath) {
-        try {
-            if (window.supabaseStorageManager) {
-                return await window.supabaseStorageManager.deleteFile(filePath);
-            } else {
-                throw new Error('Supabase Storage Manager not available');
-            }
-        } catch (error) {
-            console.error('Error deleting file:', error);
-            throw error;
-        }
+        console.warn('ImgBB does not support file deletion via API');
+        return true;
     }
 
-    // Validate file type and size
-    validateImageFile(file) {
-        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-        const maxSize = 5 * 1024 * 1024; // 5MB
-
-        if (!allowedTypes.includes(file.type)) {
-            throw new Error('Please upload a valid image file (JPEG, PNG, or WebP)');
-        }
-
-        if (file.size > maxSize) {
-            throw new Error('File size must be less than 5MB');
-        }
-
-        return true;
+    // Get file URL (same as upload result)
+    getFileUrl(filePath) {
+        return filePath; // ImgBB URLs are already public
     }
 
     // Create file preview
