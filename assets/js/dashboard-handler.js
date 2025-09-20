@@ -800,8 +800,9 @@ class DashboardHandler {
                 balanceChanges.forEach((change, index) => {
                     console.log(`Processing balance change ${index}:`, change);
 
-                    // Skip only withdrawal_approved to avoid duplicates, but keep withdrawal_submitted and withdrawal_rejected_refund
-                    if (change.reason === 'withdrawal_approved') {
+                    // Skip withdrawal balance changes to avoid duplicates with withdrawal records
+                    // Keep only withdrawal_rejected_refund as it's not covered by withdrawal records
+                    if (change.reason === 'withdrawal_approved' || change.reason === 'withdrawal_submitted') {
                         console.log('Skipping withdrawal balance change:', change.reason);
                         return;
                     }
@@ -879,17 +880,31 @@ class DashboardHandler {
             });
             console.log('All transactions after adding withdrawals:', allTransactions);
 
+            // Remove duplicates based on reference number and type
+            const uniqueTransactions = [];
+            const seenTransactions = new Set();
+
+            allTransactions.forEach(transaction => {
+                const key = `${transaction.type}_${transaction.reference}_${transaction.amount}_${transaction.date}`;
+                if (!seenTransactions.has(key)) {
+                    seenTransactions.add(key);
+                    uniqueTransactions.push(transaction);
+                } else {
+                    console.log('Removing duplicate transaction:', transaction);
+                }
+            });
+
             // Sort by date (newest first)
-            allTransactions.sort((a, b) => {
+            uniqueTransactions.sort((a, b) => {
                 const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
                 const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
                 return dateB - dateA;
             });
 
-            console.log('All transactions after processing:', allTransactions);
+            console.log('All transactions after deduplication:', uniqueTransactions);
 
             // Display transactions
-            if (allTransactions.length === 0) {
+            if (uniqueTransactions.length === 0) {
                 historyContainer.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-wallet text-4xl mb-4 text-gray-400"></i>
@@ -900,7 +915,7 @@ class DashboardHandler {
                 return;
             }
 
-            historyContainer.innerHTML = allTransactions.map(transaction => {
+            historyContainer.innerHTML = uniqueTransactions.map(transaction => {
                 const date = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
                 const formattedDate = date.toLocaleDateString('en-US', {
                     year: 'numeric',
@@ -932,9 +947,24 @@ class DashboardHandler {
 
                 // Determine transaction type and styling
                 const isEarning = transaction.amount > 0;
-                const transactionType = isEarning ? 'Earning' : 'Withdrawal';
-                const typeIcon = isEarning ? 'fa-plus-circle' : 'fa-minus-circle';
-                const typeClass = isEarning ? 'text-green-500' : 'text-red-500';
+                const isRefund = transaction.description && transaction.description.includes('Refunded');
+                let transactionType;
+                let typeIcon;
+                let typeClass;
+
+                if (isRefund) {
+                    transactionType = 'Refunded';
+                    typeIcon = 'fa-undo';
+                    typeClass = 'text-purple-500';
+                } else if (isEarning) {
+                    transactionType = 'Earning';
+                    typeIcon = 'fa-plus-circle';
+                    typeClass = 'text-green-500';
+                } else {
+                    transactionType = 'Withdrawal';
+                    typeIcon = 'fa-minus-circle';
+                    typeClass = 'text-red-500';
+                }
 
                 return `
                     <div class="transaction-item">
@@ -944,8 +974,8 @@ class DashboardHandler {
                         <div class="transaction-details">
                             <div class="transaction-header">
                                 <div class="transaction-type">${transactionType}</div>
-                                <div class="transaction-amount ${isEarning ? 'text-green-600' : 'text-red-600'}">
-                                    ${isEarning ? '+' : '-'}₱${Math.abs(transaction.amount)}
+                                <div class="transaction-amount ${isRefund ? 'text-purple-600' : (isEarning ? 'text-green-600' : 'text-red-600')}">
+                                    ${isRefund ? '+' : (isEarning ? '+' : '-')}₱${Math.abs(transaction.amount)}
                                 </div>
                             </div>
                             <div class="transaction-description">${transaction.description}</div>
@@ -995,35 +1025,14 @@ class DashboardHandler {
             // Combine all activities
             const allActivities = [];
 
-            // Add balance change activities (primary source)
-            balanceChanges.forEach(change => {
-                // Skip withdrawal_approved to avoid duplicates with withdrawal activities
-                // Keep all other balance changes including task completions
-                if (change.reason === 'withdrawal_approved') {
-                    return;
-                }
+            // Create a map to track withdrawals by reference number to avoid duplicates
+            const withdrawalMap = new Map();
 
-                allActivities.push({
-                    type: 'balance_change',
-                    action: change.reason,
-                    description: this.getBalanceChangeDescription(change),
-                    date: change.timestamp,
-                    reference: change.metadata?.referenceNumber || 'N/A',
-                    status: this.getStatusForReason(change.reason),
-                    details: {
-                        beforeBalance: change.beforeBalance,
-                        afterBalance: change.afterBalance,
-                        changeAmount: change.changeAmount,
-                        metadata: change.metadata
-                    }
-                });
-            });
-
-            // Skip adding task activities separately since they're already covered by balance changes
-            // This prevents duplicate entries for the same task completion
-
-            // Add withdrawal activities (these show the current status)
+            // Add withdrawal activities first (these show the current status)
             withdrawals.forEach(withdrawal => {
+                const refNumber = withdrawal.referenceNumber || withdrawal.reference_number || 'N/A';
+                withdrawalMap.set(refNumber, withdrawal);
+
                 // Determine the correct action and description based on status
                 let action = 'withdrawal_submitted';
                 let description = `Withdrawal Submitted: ${withdrawal.method || withdrawal.payment_method || 'Unknown Method'}`;
@@ -1041,7 +1050,7 @@ class DashboardHandler {
                     action: action,
                     description: description,
                     date: withdrawal.created_at,
-                    reference: withdrawal.referenceNumber || withdrawal.reference_number || 'N/A',
+                    reference: refNumber,
                     status: withdrawal.status,
                     details: {
                         amount: withdrawal.amount,
@@ -1050,15 +1059,57 @@ class DashboardHandler {
                 });
             });
 
+            // Add balance change activities (but skip withdrawal-related ones to avoid duplicates)
+            balanceChanges.forEach(change => {
+                const refNumber = change.metadata?.referenceNumber || 'N/A';
+
+                // Skip withdrawal-related balance changes if we already have a withdrawal activity for this reference
+                if (change.reason === 'withdrawal_approved' ||
+                    change.reason === 'withdrawal_rejected_refund' ||
+                    change.reason === 'withdrawal_submitted' ||
+                    (refNumber !== 'N/A' && withdrawalMap.has(refNumber))) {
+                    return;
+                }
+
+                allActivities.push({
+                    type: 'balance_change',
+                    action: change.reason,
+                    description: this.getBalanceChangeDescription(change),
+                    date: change.timestamp,
+                    reference: refNumber,
+                    status: this.getStatusForReason(change.reason),
+                    details: {
+                        beforeBalance: change.beforeBalance,
+                        afterBalance: change.afterBalance,
+                        changeAmount: change.changeAmount,
+                        metadata: change.metadata
+                    }
+                });
+            });
+
+            // Remove duplicates based on reference number and timestamp
+            const uniqueActivities = [];
+            const seenActivities = new Set();
+
+            allActivities.forEach(activity => {
+                const date = activity.date?.toDate ? activity.date.toDate() : new Date(activity.date);
+                const key = `${activity.reference}-${date.getTime()}-${activity.type}`;
+
+                if (!seenActivities.has(key)) {
+                    seenActivities.add(key);
+                    uniqueActivities.push(activity);
+                }
+            });
+
             // Sort by date (newest first)
-            allActivities.sort((a, b) => {
+            uniqueActivities.sort((a, b) => {
                 const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
                 const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
                 return dateB - dateA;
             });
 
             // Display activities
-            if (allActivities.length === 0) {
+            if (uniqueActivities.length === 0) {
                 activityContainer.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-history text-4xl mb-4 text-gray-400"></i>
@@ -1069,7 +1120,7 @@ class DashboardHandler {
                 return;
             }
 
-            activityContainer.innerHTML = allActivities.map(activity => {
+            activityContainer.innerHTML = uniqueActivities.map(activity => {
                 const date = activity.date?.toDate ? activity.date.toDate() : new Date(activity.date);
                 const formattedDate = date.toLocaleDateString('en-US', {
                     year: 'numeric',
@@ -1079,57 +1130,162 @@ class DashboardHandler {
                     minute: '2-digit'
                 });
 
-                let iconClass = 'text-blue-500';
+                let iconClass = 'activity-icon-blue';
                 let icon = 'fa-info-circle';
                 let statusClass = 'text-gray-600';
+                let activityTypeLabel = '';
 
                 // Handle balance change activities
                 if (activity.type === 'balance_change') {
                     const isPositive = activity.details?.changeAmount > 0;
-                    iconClass = isPositive ? 'text-green-500' : 'text-red-500';
-                    icon = isPositive ? 'fa-plus-circle' : 'fa-minus-circle';
-                    statusClass = isPositive ? 'text-green-600' : 'text-red-600';
-                } else {
-                    // Handle other activity types
+                    const isRefund = activity.description && activity.description.includes('Refunded');
+
+                    if (isRefund) {
+                        iconClass = 'activity-icon-purple';
+                        icon = 'fa-undo';
+                        statusClass = 'text-purple-600';
+                        activityTypeLabel = 'REFUND';
+                    } else if (isPositive) {
+                        iconClass = 'activity-icon-green';
+                        icon = 'fa-plus-circle';
+                        statusClass = 'text-green-600';
+                        activityTypeLabel = 'EARNING';
+                    } else {
+                        iconClass = 'activity-icon-red';
+                        icon = 'fa-minus-circle';
+                        statusClass = 'text-red-600';
+                        activityTypeLabel = 'DEDUCTION';
+                    }
+                } else if (activity.type === 'withdrawal') {
+                    // Withdrawal activities - use orange/amber theme
                     switch (activity.status) {
                         case 'approved':
-                            iconClass = 'text-green-500';
+                            iconClass = 'activity-icon-green';
                             icon = 'fa-check-circle';
                             statusClass = 'text-green-600';
+                            activityTypeLabel = 'WITHDRAWAL';
                             break;
                         case 'rejected':
-                            iconClass = 'text-red-500';
+                            iconClass = 'activity-icon-red';
                             icon = 'fa-times-circle';
                             statusClass = 'text-red-600';
+                            activityTypeLabel = 'WITHDRAWAL';
+                            break;
+                        case 'pending':
+                            iconClass = 'activity-icon-orange';
+                            icon = 'fa-money-bill-wave';
+                            statusClass = 'text-orange-600';
+                            activityTypeLabel = 'WITHDRAWAL';
+                            break;
+                        default:
+                            iconClass = 'activity-icon-orange';
+                            icon = 'fa-money-bill-wave';
+                            statusClass = 'text-orange-600';
+                            activityTypeLabel = 'WITHDRAWAL';
+                            break;
+                    }
+                } else if (activity.type === 'task_submission' || activity.type === 'submission') {
+                    // Task submission activities - use blue theme
+                    switch (activity.status) {
+                        case 'approved':
+                            iconClass = 'activity-icon-green';
+                            icon = 'fa-check-circle';
+                            statusClass = 'text-green-600';
+                            activityTypeLabel = 'TASK';
+                            break;
+                        case 'rejected':
+                            iconClass = 'activity-icon-red';
+                            icon = 'fa-times-circle';
+                            statusClass = 'text-red-600';
+                            activityTypeLabel = 'TASK';
                             break;
                         case 'pending_review':
-                            iconClass = 'text-yellow-500';
+                            iconClass = 'activity-icon-yellow';
                             icon = 'fa-clock';
                             statusClass = 'text-yellow-600';
+                            activityTypeLabel = 'TASK';
                             break;
                         case 'in_progress':
-                            iconClass = 'text-blue-500';
+                            iconClass = 'activity-icon-blue';
                             icon = 'fa-play-circle';
                             statusClass = 'text-blue-600';
+                            activityTypeLabel = 'TASK';
+                            break;
+                        case 'completed':
+                            iconClass = 'activity-icon-green';
+                            icon = 'fa-trophy';
+                            statusClass = 'text-green-600';
+                            activityTypeLabel = 'TASK';
+                            break;
+                        default:
+                            iconClass = 'activity-icon-blue';
+                            icon = 'fa-tasks';
+                            statusClass = 'text-blue-600';
+                            activityTypeLabel = 'TASK';
+                            break;
+                    }
+                } else {
+                    // Default fallback for other activity types
+                    switch (activity.status) {
+                        case 'approved':
+                            iconClass = 'activity-icon-green';
+                            icon = 'fa-check-circle';
+                            statusClass = 'text-green-600';
+                            activityTypeLabel = 'ACTIVITY';
+                            break;
+                        case 'rejected':
+                            iconClass = 'activity-icon-red';
+                            icon = 'fa-times-circle';
+                            statusClass = 'text-red-600';
+                            activityTypeLabel = 'ACTIVITY';
+                            break;
+                        case 'pending_review':
+                        case 'pending':
+                            iconClass = 'activity-icon-yellow';
+                            icon = 'fa-clock';
+                            statusClass = 'text-yellow-600';
+                            activityTypeLabel = 'ACTIVITY';
+                            break;
+                        case 'in_progress':
+                            iconClass = 'activity-icon-blue';
+                            icon = 'fa-play-circle';
+                            statusClass = 'text-blue-600';
+                            activityTypeLabel = 'ACTIVITY';
+                            break;
+                        default:
+                            iconClass = 'activity-icon-gray';
+                            icon = 'fa-info-circle';
+                            statusClass = 'text-gray-600';
+                            activityTypeLabel = 'ACTIVITY';
                             break;
                     }
                 }
 
                 // Show balance change details for balance change activities
                 const balanceChangeInfo = activity.type === 'balance_change' && activity.details?.beforeBalance !== undefined
-                    ? `<div class="balance-change-info text-xs text-gray-500 mt-1">
-                         Balance: ₱${activity.details.beforeBalance} → ₱${activity.details.afterBalance}
-                       </div>`
+                    ? (() => {
+                        const before = parseFloat(activity.details.beforeBalance) || 0;
+                        const after = parseFloat(activity.details.afterBalance) || 0;
+                        const change = after - before;
+                        const changeText = change >= 0 ? `(+₱${Math.abs(change)})` : `(-₱${Math.abs(change)})`;
+                        const changeClass = change >= 0 ? 'balance-positive' : 'balance-negative';
+                        return `<div class="balance-change-info">
+                                 Balance: ₱${before} → ₱${after} <span class="${changeClass}">${changeText}</span>
+                               </div>`;
+                    })()
                     : '';
 
                 return `
-                    <div class="activity-item">
-                        <div class="activity-icon ${iconClass}">
+                    <div class="activity-item-dashboard">
+                        <div class="activity-icon-dashboard ${iconClass}">
                             <i class="fas ${icon}"></i>
                         </div>
-                        <div class="activity-details">
-                            <div class="activity-description">${activity.description}</div>
-                            <div class="activity-meta">
+                        <div class="activity-content-dashboard">
+                            <div class="activity-header-dashboard">
+                                <span class="activity-type-label">${activityTypeLabel}</span>
+                                <span class="activity-description">${activity.description}</span>
+                            </div>
+                            <div class="activity-time-dashboard">
                                 <span class="activity-date">${formattedDate}</span>
                                 <span class="status-badge status-${activity.status}">${activity.status.replace('_', ' ').toUpperCase()}</span>
                                 <span class="activity-reference">Ref: ${activity.reference}</span>
@@ -7051,15 +7207,33 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const amount = parseFloat(document.getElementById('withdrawal-amount').value);
             const method = document.getElementById('withdrawal-method').value;
             const account = document.getElementById('withdrawal-account').value;
+            const accountName = document.getElementById('withdrawal-account-name').value;
 
             // Basic validation
-            if (!amount || !method || !account) {
+            if (!amount || !method || !account || !accountName) {
                 this.showToast('❌ Please fill in all fields', 'error');
                 return;
             }
 
             if (amount <= 0) {
                 this.showToast('❌ Amount must be greater than 0', 'error');
+                return;
+            }
+
+            // Validate phone number format (must start with 09 and be 11 digits)
+            if (!/^09\d{9}$/.test(account)) {
+                this.showToast('❌ Phone number must start with "09" and be 11 digits total', 'error');
+                return;
+            }
+
+            // Validate account name (at least 2 words, no numbers)
+            if (accountName.trim().split(' ').length < 2) {
+                this.showToast('❌ Please enter your full name (first and last name)', 'error');
+                return;
+            }
+
+            if (/\d/.test(accountName)) {
+                this.showToast('❌ Account name should not contain numbers', 'error');
                 return;
             }
 
@@ -7078,7 +7252,8 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 user_id: this.currentUser.uid,
                 amount: amount,
                 method: method,
-                account_details: account
+                account_details: account,
+                account_name: accountName.trim()
             });
 
             // Create notification for withdrawal submission
@@ -7588,15 +7763,19 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         }
     }
 
-    // Modern loading modal functions
+    // Modern loading modal functions - Use centralized LoadingManager
     showLoadingModal(title = 'Loading...', message = 'Please wait while we process your request') {
-        // Remove existing loading modal if any
+        // Use the centralized LoadingManager
+        if (window.loadingManager) {
+            return window.loadingManager.showLoading(title, message);
+        }
+
+        // Fallback to local implementation if LoadingManager not available
         const existingModal = document.querySelector('.loading-modal');
         if (existingModal) {
             existingModal.remove();
         }
 
-        // Create loading modal
         const modal = document.createElement('div');
         modal.className = 'loading-modal';
         modal.innerHTML = `
@@ -7611,17 +7790,16 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
         `;
 
         document.body.appendChild(modal);
-
-        // Show modal with animation
-        setTimeout(() => {
-            modal.classList.add('show');
-        }, 10);
-
+        setTimeout(() => modal.classList.add('show'), 10);
         return modal;
     }
 
     hideLoadingModal(modal) {
-        if (modal) {
+        if (window.loadingManager && typeof modal === 'string') {
+            // If it's a LoadingManager ID, use the manager
+            window.loadingManager.hideLoading(modal);
+        } else if (modal && modal.parentNode) {
+            // Fallback for direct modal elements
             modal.classList.remove('show');
             setTimeout(() => {
                 if (modal.parentNode) {
@@ -7835,7 +8013,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             case 'withdrawal_rejected':
                 return 'rejected';
             case 'withdrawal_rejected_refund':
-                return 'approved';
+                return 'refunded';
             case 'admin_balance_adjustment':
                 return 'approved';
             case 'balance_change':

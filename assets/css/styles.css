@@ -419,20 +419,23 @@ body {
 }
 
 .section-title {
-    font-size: 2rem;
+    font-size: 2.25rem;
     font-weight: 700;
     color: #1f2937;
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 0.75rem 0;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    letter-spacing: -0.025em;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
 
 .section-subtitle {
-    font-size: 1rem;
+    font-size: 1.125rem;
     color: #6b7280;
-    margin: 0;
+    margin: 0 0 1.5rem 0;
+    font-weight: 500;
+    line-height: 1.5;
 }
 
 .header-actions {
@@ -2410,8 +2413,10 @@ body {
 }
 
 .activity-item:hover {
-    background: rgba(255, 255, 255, 0.7);
-    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.98);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.12);
+    border-color: #cbd5e1;
 }
 
 .activity-item .flex {
@@ -2494,17 +2499,18 @@ body {
 }
 
 .activity-content-modern {
-    background: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
-    border-radius: 20px;
+    border-radius: 24px;
     padding: 2rem;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.3);
     display: flex;
     flex-direction: column;
+    gap: 24px;
     align-items: stretch;
     justify-content: flex-start;
-    min-height: 200px;
+    min-height: 300px;
 }
 
 /* Notifications Section */
@@ -5206,6 +5212,10 @@ button.loading .fa-spinner {
     color: #dc2626;
 }
 
+.transaction-amount.text-purple-600 {
+    color: #7c3aed;
+}
+
 /* Transaction Status Badges */
 .transaction-status {
     margin-top: 8px;
@@ -5246,17 +5256,26 @@ button.loading .fa-spinner {
     box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
+.transaction-status .status-badge.status-refunded {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
 /* Activity item styling */
 .activity-item {
     background: white;
-    border-radius: 16px;
-    padding: 20px;
-    margin-bottom: 16px;
+    border-radius: 20px;
+    padding: 32px;
     border: 1px solid #e5e7eb;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 20px;
 }
 
 .activity-item::before {
@@ -6419,16 +6438,16 @@ button:disabled:hover,
 
 /* Modern Activity History Styles */
 .activity-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
+    width: 60px;
+    height: 60px;
+    border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 600;
-    margin-right: 16px;
     flex-shrink: 0;
+    margin-top: 4px;
 }
 
 .activity-icon.text-green-500 {
@@ -6455,31 +6474,51 @@ button:disabled:hover,
     box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 
+.activity-icon.text-purple-500 {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.activity-icon.text-gray-500 {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+}
+
 .activity-details {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 4px;
 }
 
 .activity-description {
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 600;
     color: #1f2937;
+    line-height: 1.6;
     margin-bottom: 8px;
-    line-height: 1.4;
 }
 
 .activity-meta {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 24px;
     flex-wrap: wrap;
     margin-bottom: 8px;
 }
 
 .activity-date {
-    font-size: 14px;
+    font-size: 15px;
     color: #6b7280;
     font-weight: 500;
+    background: #f8fafc;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
 }
 
 .activity-status {
@@ -6515,13 +6554,28 @@ button:disabled:hover,
     box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
 }
 
+.activity-status.text-purple-600 {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.activity-status.text-gray-600 {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+    box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);
+}
+
 .activity-reference {
-    font-size: 12px;
-    color: #9ca3af;
-    background: #f3f4f6;
-    padding: 4px 8px;
-    border-radius: 6px;
+    font-size: 13px;
+    color: #6b7280;
+    background: #f8fafc;
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-weight: 500;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .balance-change-info {
@@ -6538,12 +6592,13 @@ button:disabled:hover,
 .activity-item .status-badge {
     display: inline-flex;
     align-items: center;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .activity-item .status-badge.status-pending {
@@ -6719,9 +6774,12 @@ button:disabled:hover,
 /* Activity and Notification Container Styles */
 #activity-history,
 #notifications-list {
-    max-height: 500px;
+    max-height: 700px;
     overflow-y: auto;
-    padding-right: 8px;
+    padding-right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 #activity-history::-webkit-scrollbar,
@@ -10590,80 +10648,489 @@ button:disabled:hover,
     background-color: #fef3c7;
 }
 
-/* Enhanced Activity Item Styling */
-.activity-item {
+/* Enhanced Activity Item Styling - Dashboard History */
+.activity-item-dashboard {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-radius: 8px;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px 24px;
+    border-radius: 16px;
     background: white;
     border: 1px solid #e5e7eb;
     transition: all 0.2s ease;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-.activity-item:hover {
+.activity-item-dashboard:hover {
     background-color: #f9fafb;
     border-color: #d1d5db;
     transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-.activity-icon {
-    width: 40px;
-    height: 40px;
+.activity-icon-dashboard {
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: 20px;
     flex-shrink: 0;
+    background: #10b981;
+    color: white;
+    margin-top: 2px;
+    transition: all 0.2s ease;
 }
 
-.activity-content {
+/* Activity Icon Color Variants */
+.activity-icon-green {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.activity-icon-red {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.activity-icon-blue {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.activity-icon-yellow {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.activity-icon-orange {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+    box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+
+.activity-icon-purple {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.activity-icon-gray {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+}
+
+.activity-content-dashboard {
     flex: 1;
     min-width: 0;
 }
 
-.activity-text {
-    font-size: 14px;
-    font-weight: 500;
-    color: #111827;
-    margin-bottom: 4px;
+.activity-header-dashboard {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
+    margin-bottom: 8px;
 }
 
-.activity-time {
-    font-size: 12px;
+.activity-type-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    background: #f3f4f6;
     color: #6b7280;
+    border: 1px solid #e5e7eb;
+    flex-shrink: 0;
+}
+
+.activity-description {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    line-height: 1.3;
+    flex: 1;
+}
+
+.activity-text-dashboard {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+    line-height: 1.3;
+}
+
+.activity-time-dashboard {
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 400;
+    margin-bottom: 12px;
+}
+
+.activity-time-dashboard .activity-date {
+    font-weight: 400;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.activity-time-dashboard .status-badge {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-block;
+    margin-right: 8px;
+}
+
+.activity-time-dashboard .status-badge.status-approved {
+    background: #10b981;
+    color: white;
+}
+
+.activity-time-dashboard .status-badge.status-pending {
+    background: #f97316;
+    color: white;
+}
+
+.activity-time-dashboard .status-badge.status-rejected {
+    background: #ef4444;
+    color: white;
+}
+
+.activity-time-dashboard .status-badge.status-refunded {
+    background: #8b5cf6;
+    color: white;
+}
+
+.activity-time-dashboard .status-badge.status-completed {
+    background: #10b981;
+    color: white;
+}
+
+.activity-time-dashboard .activity-reference {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 12px;
+    color: #9ca3af;
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    display: inline-block;
+}
+
+.balance-change-info {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: rgba(107, 114, 128, 0.05);
+    border-radius: 8px;
+    border-left: 3px solid #9ca3af;
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 400;
+}
+
+.balance-change-info .balance-positive {
+    color: #10b981;
+    font-weight: 500;
+}
+
+.balance-change-info .balance-negative {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+/* Activity History Visual Consistency Improvements */
+.activity-item-dashboard:hover {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Admin Panel Activity Items - Unique Classes to Avoid Conflicts */
+.activity-item-admin {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+.activity-item-admin:hover {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.activity-icon-admin {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.activity-icon-admin:hover {
+    transform: scale(1.05);
+}
+
+.activity-content-admin {
+    flex: 1;
+    min-width: 0;
+}
+
+.activity-title-admin {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 4px;
+}
+
+.activity-details-admin {
+    font-size: 14px;
+    color: #6b7280;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.activity-meta-admin {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.activity-status-admin {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+}
+
+.activity-date-admin {
+    color: #9ca3af;
+}
+
+/* Admin Activity Icon Colors */
+.activity-icon-admin.text-blue-500 {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.activity-icon-admin.text-green-500 {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.activity-icon-admin.text-red-500 {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.activity-icon-admin.text-yellow-500 {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.activity-icon-admin.text-purple-500 {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    color: white;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+/* Admin Activity Status Colors */
+.activity-status-admin.status-approved {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.activity-status-admin.status-rejected {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.activity-status-admin.status-pending {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.activity-status-admin.status-pending_review {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.activity-status-admin.status-in_progress {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.activity-status-admin.status-completed {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+/* Responsive Design for Admin Activities */
+@media (max-width: 768px) {
+    .activity-item-admin {
+        padding: 16px 20px;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+
+    .activity-icon-admin {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+
+    .activity-title-admin {
+        font-size: 14px;
+    }
+
+    .activity-details-admin {
+        font-size: 13px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .activity-meta-admin {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+}
+
+.activity-icon-dashboard {
+    transition: all 0.2s ease;
+}
+
+.activity-icon-dashboard:hover {
+    transform: scale(1.05);
+}
+
+/* Enhanced Status Badge Styling */
+.activity-time-dashboard .status-badge {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 11px;
+    display: inline-block;
+    margin-right: 8px;
+    transition: all 0.2s ease;
+}
+
+.activity-time-dashboard .status-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Withdrawal Warning Styles */
+.withdrawal-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border: 1px solid #f59e0b;
+    border-radius: 12px;
+    margin-top: 16px;
+}
+
+.withdrawal-warning .warning-icon {
+    color: #f59e0b;
+    font-size: 20px;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.withdrawal-warning .warning-content h4 {
+    margin: 0 0 6px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #92400e;
+}
+
+.withdrawal-warning .warning-content p {
+    margin: 0;
+    font-size: 13px;
+    color: #92400e;
+    line-height: 1.4;
 }
 
 /* Responsive Design for Activity Items */
 @media (max-width: 640px) {
-    .activity-item {
-        padding: 10px 12px;
-        gap: 10px;
+    .activity-item-dashboard {
+        padding: 16px 18px;
+        gap: 12px;
+        margin-bottom: 12px;
     }
 
-    .activity-icon {
-        width: 36px;
-        height: 36px;
-        font-size: 14px;
+    .activity-icon-dashboard {
+        width: 44px;
+        height: 44px;
+        font-size: 18px;
+    }
+
+    .activity-text-dashboard {
+        font-size: 15px;
+    }
+
+    .activity-time-dashboard {
+        font-size: 13px;
+    }
+
+    .activity-time-dashboard .activity-date {
+        margin-bottom: 6px;
     }
 }
 
 /* Enhanced Empty States */
 .empty-state {
     text-align: center;
-    padding: 40px 20px;
+    padding: 60px 30px;
     background: transparent;
-    border-radius: 16px;
+    border-radius: 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    gap: 20px;
     justify-content: center;
     width: 100%;
 }
@@ -10734,7 +11201,35 @@ button:disabled:hover,
 
     .transaction-meta,
     .activity-meta {
-        gap: 12px;
+        gap: 16px;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .activity-item {
+        padding: 24px;
+        gap: 20px;
+        margin-bottom: 16px;
+    }
+
+    .activity-icon {
+        width: 52px;
+        height: 52px;
+        font-size: 18px;
+    }
+
+    .activity-description {
+        font-size: 16px;
+    }
+
+    .activity-date {
+        font-size: 14px;
+        padding: 5px 10px;
+    }
+
+    .activity-reference {
+        font-size: 12px;
+        padding: 6px 12px;
     }
 
     .transaction-amount {
@@ -14233,5 +14728,3 @@ body::before {
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
-
-/ *   E n h a n c e d   L o a d i n g   S t a t e s   f o r   T a s k s   G r i d   * / 

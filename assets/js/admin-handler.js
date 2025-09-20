@@ -552,17 +552,30 @@ class AdminHandler {
                 return;
             }
 
-            activityList.innerHTML = recentActivities.map(activity => `
-                <div class="activity-item">
-                    <div class="activity-icon">
-                        <i class="${activity.icon}"></i>
+            activityList.innerHTML = recentActivities.map(activity => {
+                // Determine icon color based on activity type
+                let iconClass = 'text-blue-500';
+
+                if (activity.type === 'verification') {
+                    iconClass = 'text-blue-500'; // Task submissions use blue
+                } else if (activity.type === 'withdrawal') {
+                    iconClass = 'text-purple-500'; // Withdrawals use purple
+                }
+
+                return `
+                    <div class="activity-item-admin">
+                        <div class="activity-icon-admin ${iconClass}">
+                            <i class="${activity.icon}"></i>
+                        </div>
+                        <div class="activity-content-admin">
+                            <div class="activity-title-admin">${activity.text}</div>
+                            <div class="activity-meta-admin">
+                                <span class="activity-date-admin">${activity.time.toLocaleString()}</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="activity-content">
-                        <div class="activity-text">${activity.text}</div>
-                        <div class="activity-time">${activity.time.toLocaleString()}</div>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
 
         } catch (error) {
             console.error('❌ Error loading recent activity:', error);
@@ -4680,7 +4693,11 @@ Default instructions include:
                             <span class="detail-value">${withdrawal.method}</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">Account:</span>
+                            <span class="detail-label">Account Name:</span>
+                            <span class="detail-value">${withdrawal.account_name || 'N/A'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Phone Number:</span>
                             <span class="detail-value">${withdrawal.account_details}</span>
                         </div>
                         <div class="detail-row">

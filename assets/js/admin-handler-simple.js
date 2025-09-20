@@ -542,30 +542,86 @@ class AdminHandler {
 
             console.log('📋 Rendering activities:', activities.length, activities);
 
-            const html = activities.map(activity => `
-                <div class="activity-item">
-                    <div class="activity-icon">
-                        <i class="fas ${activity.type === 'submission' ? 'fa-tasks' : 'fa-money-bill-wave'}"></i>
-                    </div>
-                    <div class="activity-content">
-                        <div class="activity-title">
-                            ${activity.type === 'submission' ? 'Task Submission' : 'Withdrawal Request'}
-                        </div>
-                        <div class="activity-details">
-                            <span class="activity-user">${activity.user}</span>
-                            <span class="activity-user-id">• ID: ${activity.userShortId}</span>
-                            ${activity.type === 'submission' ?
-                    `<span class="activity-task">• ${activity.task}</span>` :
-                    `<span class="activity-amount">• ₱${activity.amount}</span>`
+            const html = activities.map(activity => {
+                // Determine icon and color based on activity type and status
+                let iconClass = 'text-blue-500';
+                let icon = 'fa-info-circle';
+
+                if (activity.type === 'submission') {
+                    // Task submission activities
+                    switch (activity.status) {
+                        case 'approved':
+                            iconClass = 'text-green-500';
+                            icon = 'fa-check-circle';
+                            break;
+                        case 'rejected':
+                            iconClass = 'text-red-500';
+                            icon = 'fa-times-circle';
+                            break;
+                        case 'pending_review':
+                            iconClass = 'text-yellow-500';
+                            icon = 'fa-clock';
+                            break;
+                        case 'in_progress':
+                            iconClass = 'text-blue-500';
+                            icon = 'fa-play-circle';
+                            break;
+                        case 'completed':
+                            iconClass = 'text-green-500';
+                            icon = 'fa-trophy';
+                            break;
+                        default:
+                            iconClass = 'text-blue-500';
+                            icon = 'fa-tasks';
+                            break;
+                    }
+                } else {
+                    // Withdrawal activities
+                    switch (activity.status) {
+                        case 'approved':
+                            iconClass = 'text-green-500';
+                            icon = 'fa-check-circle';
+                            break;
+                        case 'rejected':
+                            iconClass = 'text-red-500';
+                            icon = 'fa-times-circle';
+                            break;
+                        case 'pending':
+                            iconClass = 'text-purple-500';
+                            icon = 'fa-money-bill-wave';
+                            break;
+                        default:
+                            iconClass = 'text-purple-500';
+                            icon = 'fa-money-bill-wave';
+                            break;
+                    }
                 }
+
+                return `
+                    <div class="activity-item-admin">
+                        <div class="activity-icon-admin ${iconClass}">
+                            <i class="fas ${icon}"></i>
                         </div>
-                        <div class="activity-meta">
-                            <span class="activity-status status-${activity.status}">${activity.status.replace('_', ' ').toUpperCase()}</span>
-                            <span class="activity-date">${activity.date.toLocaleString()}</span>
+                        <div class="activity-content-admin">
+                            <div class="activity-title-admin">
+                                ${activity.type === 'submission' ? 'Task Submission' : 'Withdrawal Request'}
+                            </div>
+                            <div class="activity-details-admin">
+                                <span class="activity-user">${activity.user}</span>
+                                <span class="activity-user-id">• ID: ${activity.userShortId}</span>
+                                ${activity.type === 'submission' ?
+                        `<span class="activity-task">• ${activity.task}</span>` :
+                        `<span class="activity-amount">• ₱${activity.amount}</span>`
+                    }
+                            </div>
+                            <div class="activity-meta-admin">
+                                <span class="activity-status-admin status-${activity.status}">${activity.status.replace('_', ' ').toUpperCase()}</span>
+                                <span class="activity-date-admin">${activity.date.toLocaleString()}</span>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
 
             console.log('📋 Setting container HTML:', html);
             container.innerHTML = html;
@@ -1199,7 +1255,11 @@ class AdminHandler {
                             <span class="detail-value">${withdrawal.method || 'N/A'}</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">Account:</span>
+                            <span class="detail-label">Account Name:</span>
+                            <span class="detail-value">${withdrawal.account_name || 'N/A'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Phone Number:</span>
                             <span class="detail-value">${withdrawal.account || 'N/A'}</span>
                         </div>
                         <div class="detail-row">
@@ -1410,6 +1470,15 @@ class AdminHandler {
                             <small class="form-help">Optional: Background image for the task card header</small>
                         </div>
                         <div class="form-group">
+                            <label class="form-label">Difficulty Level</label>
+                            <select id="task-difficulty" class="form-select">
+                                <option value="easy">⭐ Easy</option>
+                                <option value="medium" selected>⭐⭐ Medium</option>
+                                <option value="hard">⭐⭐⭐ Hard</option>
+                                <option value="expert">⭐⭐⭐⭐ Expert</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label class="form-label">Task Status</label>
                             <select id="task-status" class="form-select">
                                 <option value="active">Active</option>
@@ -1470,6 +1539,7 @@ class AdminHandler {
                 requires_referrer_email: requiresReferrer,
                 referrer_warning_message: requiresReferrer ? referrerWarningMessage : null,
                 max_restarts: parseInt(document.getElementById('task-max-restarts').value) || 3,
+                difficulty: document.getElementById('task-difficulty').value,
                 task_deadline: taskDeadline,
                 task_deadline_hours: hoursUntilDeadline,
                 user_time_limit_hours: finalUserTimeLimit,
@@ -1694,6 +1764,15 @@ class AdminHandler {
                                 <small class="form-help">Optional: Background image for the task card header</small>
                             </div>
                             <div class="form-group">
+                                <label class="form-label">Difficulty Level</label>
+                                <select id="edit-task-difficulty" class="form-select">
+                                    <option value="easy" ${task.difficulty === 'easy' ? 'selected' : ''}>⭐ Easy</option>
+                                    <option value="medium" ${task.difficulty === 'medium' ? 'selected' : ''}>⭐⭐ Medium</option>
+                                    <option value="hard" ${task.difficulty === 'hard' ? 'selected' : ''}>⭐⭐⭐ Hard</option>
+                                    <option value="expert" ${task.difficulty === 'expert' ? 'selected' : ''}>⭐⭐⭐⭐ Expert</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label">Task Status</label>
                                 <select id="edit-task-status" class="form-select">
                                     <option value="active" ${task.status === 'active' ? 'selected' : ''}>Active</option>
@@ -1763,6 +1842,7 @@ class AdminHandler {
                 requires_referrer_email: requiresReferrer,
                 referrer_warning_message: requiresReferrer ? referrerWarningMessage : null,
                 max_restarts: parseInt(document.getElementById('edit-task-max-restarts').value) || 3,
+                difficulty: document.getElementById('edit-task-difficulty').value,
                 task_deadline: taskDeadline,
                 task_deadline_hours: hoursUntilDeadline,
                 user_time_limit_hours: finalUserTimeLimit,
@@ -2146,6 +2226,21 @@ class AdminHandler {
                             adminEmail: this.currentUser?.email || 'unknown'
                         }
                     );
+
+                    // Create notification for user
+                    const action = changeAmount > 0 ? 'add' : changeAmount < 0 ? 'subtract' : 'set';
+                    await window.firestoreManager.createAdminNotification(userId, {
+                        type: 'balance_change',
+                        title: '💰 Balance Updated',
+                        message: `Your wallet balance has been ${action === 'add' ? 'increased' : action === 'subtract' ? 'decreased' : 'set'} by ₱${Math.abs(changeAmount)}. New balance: ₱${newBalance}`,
+                        data: {
+                            action: action,
+                            amount: Math.abs(changeAmount),
+                            oldBalance: currentBalance,
+                            newBalance: newBalance,
+                            reason: reason || 'Admin adjustment'
+                        }
+                    });
 
                     // Update local user data
                     const userIndex = this.users.findIndex(u => (u.uid || u.id) === userId);

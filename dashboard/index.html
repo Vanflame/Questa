@@ -575,16 +575,33 @@
                         <select id="withdrawal-method" required class="form-select-modern">
                             <option value="">Select withdrawal method</option>
                             <option value="gcash">💳 GCash</option>
-                            <option value="bank">🏦 Bank Transfer</option>
-                            <option value="paypal">🌐 PayPal</option>
+                            <option value="maya">💎 Maya</option>
                         </select>
                     </div>
 
                     <div class="form-group-modern">
-                        <label class="form-label-modern">Account Details</label>
-                        <input type="text" id="withdrawal-account" required class="form-input-modern"
-                            placeholder="Enter phone number or account details">
-                        <small class="form-help-modern">Example: 09123456789 or Account Number</small>
+                        <label class="form-label-modern">Account Holder Name</label>
+                        <input type="text" id="withdrawal-account-name" required class="form-input-modern"
+                            placeholder="Enter account holder's full name">
+                        <small class="form-help-modern">Name as it appears on your GCash/Maya account</small>
+                    </div>
+
+                    <div class="form-group-modern">
+                        <label class="form-label-modern">Phone Number</label>
+                        <input type="tel" id="withdrawal-account" required class="form-input-modern"
+                            placeholder="09123456789" maxlength="11" pattern="09[0-9]{9}">
+                        <small class="form-help-modern">Must start with "09" and be 11 digits total</small>
+                    </div>
+
+                    <div class="withdrawal-warning">
+                        <div class="warning-icon">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="warning-content">
+                            <h4>⚠️ Double-Check Your Details</h4>
+                            <p>Please verify your account holder name and phone number before submitting. Incorrect
+                                details may result in failed transactions.</p>
+                        </div>
                     </div>
                 </form>
             </div>

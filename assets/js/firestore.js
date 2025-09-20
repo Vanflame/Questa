@@ -692,6 +692,7 @@ class FirestoreManager {
                 method: withdrawalData.method,
                 account: withdrawalData.account_details, // Store as 'account' for consistency
                 account_details: withdrawalData.account_details,
+                account_name: withdrawalData.account_name || '',
                 status: 'pending',
                 referenceNumber: referenceNumber,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -755,6 +756,7 @@ class FirestoreManager {
                     method: withdrawalData.method,
                     account: withdrawalData.account_details,
                     account_details: withdrawalData.account_details,
+                    account_name: withdrawalData.account_name || '',
                     status: 'pending',
                     referenceNumber: referenceNumber,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
