@@ -1078,7 +1078,113 @@ body {
 @media (max-width: 640px) {
     .tasks-grid {
         grid-template-columns: 1fr;
-        gap: 1rem;
+        gap: 0.5rem;
+        padding: 0.75rem 0;
+    }
+
+    .task-card-modern {
+        min-height: 200px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .task-card-header {
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .task-title {
+        font-size: 0.9rem;
+        line-height: 1.3;
+        margin-bottom: 0.25rem;
+    }
+
+    .task-description {
+        font-size: 0.75rem;
+        line-height: 1.3;
+        margin-bottom: 0.5rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .task-meta {
+        margin-bottom: 0.5rem;
+    }
+
+    .task-meta-item {
+        font-size: 0.7rem;
+        margin-bottom: 0.15rem;
+    }
+
+    .task-meta-item i {
+        font-size: 0.65rem;
+        margin-right: 0.2rem;
+    }
+
+    .task-reward {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .task-actions {
+        padding-top: 0.25rem;
+    }
+
+    .task-action-btn {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.75rem;
+        min-height: 32px;
+    }
+
+    .task-deadline-timer {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .task-status-badge {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+        margin-bottom: 0.25rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .task-card-modern {
+        min-height: 160px;
+        padding: 0.5rem;
+    }
+
+    .task-title {
+        font-size: 0.85rem;
+    }
+
+    .task-description {
+        font-size: 0.7rem;
+        -webkit-line-clamp: 1;
+        line-clamp: 1;
+    }
+
+    .task-meta-item {
+        font-size: 0.65rem;
+    }
+
+    .task-reward {
+        font-size: 0.9rem;
+    }
+
+    .task-action-btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+        min-height: 28px;
+    }
+
+    .tasks-grid {
+        gap: 0.25rem;
+        padding: 0.5rem 0;
     }
 }
 
@@ -14127,3 +14233,5 @@ body::before {
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
+
+/ *   E n h a n c e d   L o a d i n g   S t a t e s   f o r   T a s k s   G r i d   * / 

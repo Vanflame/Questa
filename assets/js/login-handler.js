@@ -8,11 +8,33 @@ class LoginHandler {
     init() {
         console.log('🔐 Initializing Login Handler...');
 
+        // Clear any existing loading modals on page load
+        this.hideAllLoadingModals();
+
+        // Suppress COOP warnings (they're not critical for functionality)
+        this.suppressCOOPWarnings();
+
         // Wait for Firebase to be ready
         this.waitForFirebase().then(() => {
             this.setupEventListeners();
             this.checkAuthState();
         });
+    }
+
+    suppressCOOPWarnings() {
+        // Override console.warn to filter out only specific Firebase COOP warnings
+        const originalWarn = console.warn;
+        console.warn = function (...args) {
+            const message = args.join(' ');
+            // Only suppress specific Firebase COOP warnings, not all warnings
+            if (message.includes('Cross-Origin-Opener-Policy policy would block the window.closed call') ||
+                (message.includes('Cross-Origin-Opener-Policy') && message.includes('popup.ts')) ||
+                (message.includes('Cross-Origin-Opener-Policy') && message.includes('Firebase'))) {
+                // Suppress only Firebase COOP warnings as they don't affect functionality
+                return;
+            }
+            originalWarn.apply(console, args);
+        };
     }
 
     async waitForFirebase() {
@@ -33,6 +55,12 @@ class LoginHandler {
         // Google login
         document.getElementById('google-login').addEventListener('click', () => {
             this.signInWithGoogle();
+        });
+
+        // Add right-click context menu for Google login (alternative method)
+        document.getElementById('google-login').addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.signInWithGoogleRedirect();
         });
 
         // Email login/register
@@ -66,6 +94,34 @@ class LoginHandler {
                 // Don't auto-redirect, let user choose to login or register
             }
         });
+
+        // Handle redirect result for Google OAuth
+        this.handleRedirectResult();
+    }
+
+    async handleRedirectResult() {
+        try {
+            const result = await auth.getRedirectResult();
+            if (result.credential) {
+                console.log('✅ Google sign-in successful via redirect');
+
+                // Hide any existing loading modals
+                this.hideAllLoadingModals();
+
+                this.showToast('Successfully signed in with Google!', 'success');
+
+                // Create or update user document
+                await this.createUserDocument(result.user);
+
+                // Redirect to dashboard
+                this.redirectToDashboard();
+            }
+        } catch (error) {
+            console.error('Error handling redirect result:', error);
+            // Hide any existing loading modals on error
+            this.hideAllLoadingModals();
+            // Don't show error toast here as it might be confusing
+        }
     }
 
     async signInWithGoogle() {
@@ -75,8 +131,55 @@ class LoginHandler {
             this.isSigningIn = true;
             loadingModal = this.showLoadingModal('Signing In', 'Please wait while we sign you in with Google...');
 
+            // Debug: Check if Firebase auth is properly initialized
+            if (!auth) {
+                throw new Error('Firebase Auth is not initialized');
+            }
+
             const provider = new firebase.auth.GoogleAuthProvider();
-            const result = await auth.signInWithPopup(provider);
+
+            // Add additional scopes if needed
+            provider.addScope('email');
+            provider.addScope('profile');
+
+            // Set custom parameters
+            provider.setCustomParameters({
+                prompt: 'select_account'
+            });
+
+            console.log('🔐 Attempting Google sign-in...');
+            console.log('🔍 Provider config:', {
+                providerId: provider.providerId,
+                scopes: provider.scopes,
+                customParameters: provider.customParameters
+            });
+
+            // Try popup first, fallback to redirect if popup is blocked
+            let result;
+            try {
+                result = await auth.signInWithPopup(provider);
+                console.log('✅ Google sign-in successful via popup');
+            } catch (popupError) {
+                console.warn('⚠️ Popup error, checking if we should try redirect:', popupError);
+
+                // Check for popup-related errors or COOP issues
+                if (popupError.code === 'auth/popup-blocked' ||
+                    popupError.code === 'auth/popup-closed-by-user' ||
+                    popupError.message.includes('popup') ||
+                    popupError.message.includes('Cross-Origin-Opener-Policy') ||
+                    popupError.message.includes('COOP') ||
+                    popupError.message.includes('window.closed')) {
+
+                    this.hideLoadingModal(loadingModal);
+                    this.showToast('Popup blocked by browser. Redirecting to Google sign-in...', 'info');
+
+                    // Use redirect method - no loading modal needed as page will reload
+                    await auth.signInWithRedirect(provider);
+                    return; // The page will reload after redirect
+                } else {
+                    throw popupError; // Re-throw if it's not a popup-related error
+                }
+            }
 
             // Create or update user document
             await this.createUserDocument(result.user);
@@ -85,10 +188,57 @@ class LoginHandler {
             this.redirectToDashboard();
         } catch (error) {
             console.error('Google sign-in error:', error);
-            this.showToast('Failed to sign in with Google: ' + error.message, 'error');
+            let errorMessage = 'Failed to sign in with Google';
+
+            // Handle specific OAuth errors
+            switch (error.code) {
+                case 'auth/popup-blocked':
+                    errorMessage = 'Popup blocked by browser. Please allow popups for this site and try again, or right-click the Google button and select "Open in new tab".';
+                    break;
+                case 'auth/popup-closed-by-user':
+                    errorMessage = 'Sign-in cancelled. Please try again.';
+                    break;
+                case 'auth/account-exists-with-different-credential':
+                    errorMessage = 'An account already exists with this email using a different sign-in method.';
+                    break;
+                case 'auth/operation-not-allowed':
+                    errorMessage = 'Google sign-in is not enabled. Please contact support.';
+                    break;
+                case 'auth/unauthorized-domain':
+                    errorMessage = 'This domain is not authorized for Google sign-in.';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                    break;
+                default:
+                    errorMessage = `Failed to sign in with Google: ${error.message}`;
+            }
+
+            this.showToast(errorMessage, 'error');
         } finally {
             this.isSigningIn = false;
             this.hideLoadingModal(loadingModal);
+        }
+    }
+
+    async signInWithGoogleRedirect() {
+        try {
+            console.log('🔐 Attempting Google sign-in via redirect...');
+
+            const provider = new firebase.auth.GoogleAuthProvider();
+            provider.addScope('email');
+            provider.addScope('profile');
+            provider.setCustomParameters({
+                prompt: 'select_account'
+            });
+
+            this.showToast('Redirecting to Google sign-in...', 'info');
+
+            // Use redirect method
+            await auth.signInWithRedirect(provider);
+        } catch (error) {
+            console.error('Google redirect sign-in error:', error);
+            this.showToast('Failed to redirect to Google sign-in: ' + error.message, 'error');
         }
     }
 
@@ -204,6 +354,19 @@ class LoginHandler {
                 }
             }, 300);
         }
+    }
+
+    hideAllLoadingModals() {
+        // Hide all loading modals on the page
+        const loadingModals = document.querySelectorAll('.loading-modal');
+        loadingModals.forEach(modal => {
+            modal.classList.remove('show');
+            setTimeout(() => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            }, 300);
+        });
     }
 
     showToast(message, type = 'info') {

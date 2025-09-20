@@ -322,6 +322,11 @@ class DashboardHandler {
                 if (userData.status === 'disabled') {
                     this.showAccountDisabledNotice();
                     this.updateUIForDisabledUser();
+                    // Mark all data as loaded for disabled users to hide loading modal
+                    this.markDataLoaded('userData');
+                    this.markDataLoaded('tasks');
+                    this.markDataLoaded('wallet');
+                    this.markDataLoaded('notifications');
                     return;
                 }
 
@@ -378,10 +383,11 @@ class DashboardHandler {
     }
 
     async showAccountDisabledNotice() {
+        console.log('🔒 Showing account disabled notice');
         const tasksGrid = document.getElementById('tasks-grid');
         if (tasksGrid) {
             // Get support email from settings
-            let supportEmail = 'support@example.com';
+            let supportEmail = 'odetteje3@gmail.com';
             try {
                 const settingsDoc = await db.collection('settings').doc('app').get();
                 if (settingsDoc.exists) {
@@ -405,6 +411,9 @@ class DashboardHandler {
                     </div>
                 </div>
             `;
+            console.log('✅ Account disabled notice displayed');
+        } else {
+            console.warn('⚠️ Tasks grid not found, cannot show disabled notice');
         }
     }
 
@@ -1426,10 +1435,29 @@ class DashboardHandler {
             const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
             if (userDoc.exists && userDoc.data().status === 'disabled') {
                 this.showAccountDisabledNotice();
+                // Mark all data as loaded for disabled users to hide loading modal
+                this.markDataLoaded('userData');
+                this.markDataLoaded('tasks');
+                this.markDataLoaded('wallet');
+                this.markDataLoaded('notifications');
                 return;
             }
 
             console.log('Loading tasks...', forceRefresh ? '(force refresh)' : '');
+
+            // Show loading state in tasks grid
+            const tasksGrid = document.getElementById('tasks-grid');
+            if (tasksGrid) {
+                tasksGrid.innerHTML = `
+                    <div class="tasks-loading-state">
+                        <div class="tasks-loading-spinner">
+                            <div class="spinner"></div>
+                        </div>
+                        <h3 class="tasks-loading-title">Loading Tasks</h3>
+                        <p class="tasks-loading-subtitle">Please wait while we fetch your available tasks</p>
+                    </div>
+                `;
+            }
 
             // Clear cache if force refresh is requested
             if (forceRefresh) {
@@ -1528,7 +1556,8 @@ class DashboardHandler {
                 });
             });
 
-            this.renderTasks(activeTasks);
+            // Render tasks and wait for completion
+            await this.renderTasks(activeTasks);
 
             // Start countdown timers after a short delay to ensure DOM is ready
             setTimeout(() => {
@@ -1578,8 +1607,20 @@ class DashboardHandler {
                 });
             };
 
-            // Mark tasks as loaded
-            this.markDataLoaded('tasks');
+            // Wait a bit more to ensure DOM is fully rendered and visible
+            setTimeout(() => {
+                // Verify tasks are actually visible before marking as loaded
+                const tasksGrid = document.getElementById('tasks-grid');
+                const taskCards = tasksGrid ? tasksGrid.querySelectorAll('.task-card-modern') : [];
+
+                if (taskCards.length > 0) {
+                    console.log('✅ Tasks rendered and visible, marking as loaded');
+                    this.markDataLoaded('tasks');
+                } else {
+                    console.log('⚠️ No task cards found, but marking as loaded anyway');
+                    this.markDataLoaded('tasks');
+                }
+            }, 200);
 
             // Add debug function to window for testing
             window.debugTaskStatus = (taskId) => this.debugTaskStatus(taskId);
@@ -2289,10 +2330,15 @@ class DashboardHandler {
     }
 
     async renderTasks(tasks) {
+        console.log('🎨 Starting to render tasks:', tasks.length);
         const tasksGrid = document.getElementById('tasks-grid');
-        if (!tasksGrid) return;
+        if (!tasksGrid) {
+            console.error('❌ Tasks grid not found');
+            return;
+        }
 
         if (tasks.length === 0) {
+            console.log('📭 No tasks to render, showing empty state');
             tasksGrid.innerHTML = `
                 <div class="col-span-full text-center py-12">
                     <i class="fas fa-tasks text-4xl text-gray-400 mb-4"></i>
@@ -2303,6 +2349,7 @@ class DashboardHandler {
             return;
         }
 
+        console.log('🔄 Loading task statuses for', tasks.length, 'tasks...');
         // Load task statuses for all tasks
         const tasksWithStatus = await Promise.all(tasks.map(async (task) => {
             // Force refresh the task status to ensure we get the latest data
@@ -2321,15 +2368,19 @@ class DashboardHandler {
             };
         }));
 
+        console.log('🎨 Rendering task cards to DOM...');
         tasksGrid.innerHTML = tasksWithStatus.map(task => {
             return this.createTaskCard(task);
         }).join('');
 
+        console.log('✅ Task cards rendered, updating timers...');
         // Update remaining time displays after rendering
         this.updateRemainingTimeDisplays(tasksWithStatus);
 
         // Set up periodic updates for remaining time displays
         this.startRemainingTimeTimer(tasksWithStatus);
+
+        console.log('✅ Task rendering completed');
 
         // Add manual refresh function to window for debugging
         window.refreshTasks = () => {
@@ -5932,7 +5983,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
 
             modal.innerHTML = `
                 <div class="modal-overlay" onclick="this.closest('.modal').remove()"></div>
-                <div class="modal-container max-w-2xl">
+                <div class="modal-container max-w-2xl" style="position: relative;">
                     <div class="modal-header">
                         <div class="flex items-start justify-between">
                             <div class="flex items-center space-x-4">
@@ -6034,8 +6085,11 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
     }
 
     async submitTaskCompletion(taskId, modal, button = null) {
-        return await window.loadingManager.withDatabaseLoading(async () => {
+        try {
             console.log('🔄 Submitting task completion...');
+
+            // Show loading overlay within the modal
+            this.showModalLoading(modal, 'Uploading Screenshot', 'Please wait while we upload your proof...');
 
             // Set button loading state
             if (button) {
@@ -6046,12 +6100,13 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const completionNotes = document.getElementById('completion-notes').value.trim();
 
             if (!completionProof) {
+                this.hideModalLoading(modal);
                 this.showToast('Please upload a completion screenshot', 'error');
                 return;
             }
 
-            // Show loading state
-            this.showToast('📤 Uploading screenshot...', 'info');
+            // Update loading message
+            this.updateModalLoading(modal, 'Processing Submission', 'Saving your task completion...');
 
             // Upload screenshot to Firebase Storage
             console.log('📤 Uploading completion screenshot...');
@@ -6090,6 +6145,7 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
                 console.log('✅ Task submission created');
             }
 
+            this.hideModalLoading(modal);
             this.showToast('✅ Task completion submitted successfully! Your submission is now under review.', 'success');
             modal.remove();
 
@@ -6101,12 +6157,115 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
 
             await this.loadTasks();
 
-        }, 'Submitting Task Completion', 'Please wait while we process your submission...').finally(() => {
+        } catch (error) {
+            console.error('Error submitting task completion:', error);
+            this.hideModalLoading(modal);
+            this.showToast('Failed to submit task completion: ' + error.message, 'error');
+        } finally {
             // Reset button loading state
             if (button) {
                 this.setButtonLoading(button, false);
             }
-        });
+        }
+    }
+
+    // Modal loading functions
+    showModalLoading(modal, title = 'Loading...', message = 'Please wait...') {
+        // Remove existing loading overlay if any
+        const existingLoading = modal.querySelector('.modal-loading-overlay');
+        if (existingLoading) {
+            existingLoading.remove();
+        }
+
+        // Create loading overlay
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.className = 'modal-loading-overlay';
+        loadingOverlay.innerHTML = `
+            <div class="modal-loading-content">
+                <div class="modal-loading-spinner">
+                    <div class="spinner"></div>
+                </div>
+                <h3 class="modal-loading-title">${title}</h3>
+                <p class="modal-loading-message">${message}</p>
+            </div>
+        `;
+
+        // Add to modal
+        modal.appendChild(loadingOverlay);
+
+        // Add CSS if not already added
+        if (!document.getElementById('modal-loading-styles')) {
+            const style = document.createElement('style');
+            style.id = 'modal-loading-styles';
+            style.textContent = `
+                .modal-loading-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(4px);
+                    z-index: 1000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-radius: 16px;
+                }
+
+                .modal-loading-content {
+                    text-align: center;
+                    padding: 2rem;
+                }
+
+                .modal-loading-spinner {
+                    width: 48px;
+                    height: 48px;
+                    margin: 0 auto 1rem;
+                }
+
+                .modal-loading-spinner .spinner {
+                    width: 48px;
+                    height: 48px;
+                    border: 4px solid #f3f4f6;
+                    border-top: 4px solid #667eea;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                }
+
+                .modal-loading-title {
+                    font-size: 1.125rem;
+                    font-weight: 600;
+                    color: #1f2937;
+                    margin-bottom: 0.5rem;
+                }
+
+                .modal-loading-message {
+                    font-size: 0.875rem;
+                    color: #6b7280;
+                    margin: 0;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+
+    updateModalLoading(modal, title, message) {
+        const loadingOverlay = modal.querySelector('.modal-loading-overlay');
+        if (loadingOverlay) {
+            const titleEl = loadingOverlay.querySelector('.modal-loading-title');
+            const messageEl = loadingOverlay.querySelector('.modal-loading-message');
+
+            if (titleEl) titleEl.textContent = title;
+            if (messageEl) messageEl.textContent = message;
+        }
+    }
+
+    hideModalLoading(modal) {
+        const loadingOverlay = modal.querySelector('.modal-loading-overlay');
+        if (loadingOverlay) {
+            loadingOverlay.remove();
+        }
     }
 
     // Resubmit task after rejection
@@ -6165,11 +6324,9 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
     }
 
     async submitPhase1Verification(taskId, modal) {
-        let loadingModal = null;
-
         try {
             console.log('🔄 Starting Phase 1 verification submission...');
-            loadingModal = this.showLoadingModal('Submitting Phase 1 Verification', 'Please wait while we process your verification...');
+            this.showModalLoading(modal, 'Submitting Phase 1 Verification', 'Please wait while we process your verification...');
 
             const gameId = document.getElementById('game-id').value.trim();
             const androidVersion = document.getElementById('android-version').value;
@@ -6179,12 +6336,13 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             console.log('📝 Form data:', { gameId, androidVersion, notes, screenshot: screenshot?.name });
 
             if (!gameId || !androidVersion || !screenshot) {
+                this.hideModalLoading(modal);
                 this.showToast('Please fill in all required fields', 'error');
                 return;
             }
 
-            // Show loading state
-            this.showToast('📤 Uploading screenshot...', 'info');
+            // Update loading message
+            this.updateModalLoading(modal, 'Uploading Screenshot', 'Please wait while we upload your verification image...');
 
             // Upload screenshot to Firebase Storage
             console.log('📤 Uploading screenshot...');
@@ -6250,12 +6408,14 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             // Update task status to pending
             await window.firestoreManager.updateTaskStatus(taskId, 'pending');
 
+            this.hideModalLoading(modal);
             this.showToast('✅ Phase 1 verification submitted successfully!', 'success');
             modal.remove();
             await this.loadTasks();
 
         } catch (error) {
             console.error('❌ Error submitting Phase 1 verification:', error);
+            this.hideModalLoading(modal);
 
             // Show specific error message
             let errorMessage = 'Failed to submit verification';
@@ -6272,16 +6432,12 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             }
 
             this.showToast(`❌ ${errorMessage}`, 'error');
-        } finally {
-            this.hideLoadingModal(loadingModal);
         }
     }
 
     async submitPhase2Verification(taskId, modal) {
-        let loadingModal = null;
-
         try {
-            loadingModal = this.showLoadingModal('Submitting Phase 2 Verification', 'Please wait while we process your final verification...');
+            this.showModalLoading(modal, 'Submitting Phase 2 Verification', 'Please wait while we process your final verification...');
 
             const gameId = document.getElementById('game-id-phase2').value.trim();
             const notes = document.getElementById('phase2-notes').value.trim();
@@ -6289,9 +6445,13 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const additionalScreenshots = document.getElementById('additional-screenshots').files;
 
             if (!gameId || !completionScreenshot) {
+                this.hideModalLoading(modal);
                 this.showToast('Please fill in all required fields', 'error');
                 return;
             }
+
+            // Update loading message
+            this.updateModalLoading(modal, 'Uploading Screenshots', 'Please wait while we upload your verification images...');
 
             // Get Android version from the initial verification
             const initialVerification = await window.firestoreManager.getVerificationsByUser(this.currentUser.uid);
@@ -6324,15 +6484,15 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             // Update task status to pending
             await window.firestoreManager.updateTaskStatus(taskId, 'pending');
 
+            this.hideModalLoading(modal);
             this.showToast('Phase 2 verification submitted successfully!', 'success');
             modal.remove();
             await this.loadTasks();
 
         } catch (error) {
             console.error('Error submitting Phase 2 verification:', error);
+            this.hideModalLoading(modal);
             this.showToast('Failed to submit verification: ' + error.message, 'error');
-        } finally {
-            this.hideLoadingModal(loadingModal);
         }
     }
 
@@ -6497,6 +6657,11 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
             if (userDoc.exists && userDoc.data().status === 'disabled') {
                 this.showAccountDisabledNotice();
+                // Mark all data as loaded for disabled users to hide loading modal
+                this.markDataLoaded('userData');
+                this.markDataLoaded('tasks');
+                this.markDataLoaded('wallet');
+                this.markDataLoaded('notifications');
                 return;
             }
 
@@ -7012,6 +7177,11 @@ ${task.phase2Requirements || 'Please provide proof of task completion.'}
             const userDoc = await db.collection('users').doc(this.currentUser.uid).get();
             if (userDoc.exists && userDoc.data().status === 'disabled') {
                 this.showAccountDisabledNotice();
+                // Mark all data as loaded for disabled users to hide loading modal
+                this.markDataLoaded('userData');
+                this.markDataLoaded('tasks');
+                this.markDataLoaded('wallet');
+                this.markDataLoaded('notifications');
                 return;
             }
 

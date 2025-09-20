@@ -5,11 +5,202 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Questa - Dashboard</title>
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin-allow-popups">
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="icon" type="image/png" href="/assets/images/logo.png">
     <link rel="manifest" href="/manifest.json">
     <link href="/assets/css/styles.css" rel="stylesheet">
+    <style>
+        /* Enhanced Loading States for Tasks Grid */
+        .tasks-loading-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            text-align: center;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid #f1f5f9;
+            grid-column: 1 / -1;
+            min-height: 300px;
+        }
+
+        .tasks-loading-spinner {
+            width: 56px;
+            height: 56px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tasks-loading-spinner .spinner {
+            width: 56px;
+            height: 56px;
+            border: 4px solid #f1f5f9;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .tasks-loading-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.025em;
+        }
+
+        .tasks-loading-subtitle {
+            font-size: 0.875rem;
+            color: #64748b;
+            line-height: 1.5;
+            max-width: 300px;
+            margin: 0 auto;
+        }
+
+        /* Mobile-optimized task cards */
+        @media (max-width: 768px) {
+            .task-card-modern {
+                min-height: 200px !important;
+                padding: 0.75rem !important;
+                margin-bottom: 0.5rem !important;
+            }
+
+            .task-card-header {
+                padding-bottom: 0.5rem !important;
+                margin-bottom: 0.5rem !important;
+            }
+
+            .task-title {
+                font-size: 0.9rem !important;
+                line-height: 1.3 !important;
+                margin-bottom: 0.25rem !important;
+            }
+
+            .task-description {
+                font-size: 0.75rem !important;
+                line-height: 1.3 !important;
+                margin-bottom: 0.5rem !important;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            }
+
+            .task-meta {
+                margin-bottom: 0.5rem !important;
+            }
+
+            .task-meta-item {
+                font-size: 0.7rem !important;
+                margin-bottom: 0.15rem !important;
+            }
+
+            .task-meta-item i {
+                font-size: 0.65rem !important;
+                margin-right: 0.2rem !important;
+            }
+
+            .task-reward {
+                font-size: 1rem !important;
+                margin-bottom: 0.5rem !important;
+            }
+
+            .task-actions {
+                padding-top: 0.25rem !important;
+            }
+
+            .task-action-btn {
+                padding: 0.4rem 0.8rem !important;
+                font-size: 0.75rem !important;
+                min-height: 32px !important;
+            }
+
+            .task-deadline-timer {
+                font-size: 0.65rem !important;
+                padding: 0.2rem 0.4rem !important;
+                margin-bottom: 0.25rem !important;
+            }
+
+            .task-status-badge {
+                font-size: 0.65rem !important;
+                padding: 0.2rem 0.4rem !important;
+                margin-bottom: 0.25rem !important;
+            }
+
+            /* Reduce spacing in task grid */
+            .tasks-grid {
+                gap: 0.5rem !important;
+                padding: 0.75rem 0 !important;
+            }
+
+            /* Compact loading state for mobile */
+            .tasks-loading-state {
+                padding: 2rem 1rem !important;
+                min-height: 200px !important;
+            }
+
+            .tasks-loading-spinner {
+                width: 48px !important;
+                height: 48px !important;
+                margin-bottom: 1rem !important;
+            }
+
+            .tasks-loading-spinner .spinner {
+                width: 48px !important;
+                height: 48px !important;
+            }
+
+            .tasks-loading-title {
+                font-size: 1.1rem !important;
+            }
+
+            .tasks-loading-subtitle {
+                font-size: 0.8rem !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .task-card-modern {
+                min-height: 160px !important;
+                padding: 0.5rem !important;
+            }
+
+            .task-title {
+                font-size: 0.85rem !important;
+            }
+
+            .task-description {
+                font-size: 0.7rem !important;
+                -webkit-line-clamp: 1;
+                line-clamp: 1;
+            }
+
+            .task-meta-item {
+                font-size: 0.65rem !important;
+            }
+
+            .task-reward {
+                font-size: 0.9rem !important;
+            }
+
+            .task-action-btn {
+                padding: 0.3rem 0.6rem !important;
+                font-size: 0.7rem !important;
+                min-height: 28px !important;
+            }
+
+            .tasks-grid {
+                gap: 0.25rem !important;
+                padding: 0.5rem 0 !important;
+            }
+        }
+    </style>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
